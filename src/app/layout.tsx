@@ -102,13 +102,11 @@ export default function RootLayout({
               function registerServiceWorker() {
                 // Check if Service Worker is supported
                 if (!('serviceWorker' in navigator)) {
-                  console.log('Service Worker not supported - this is normal on some mobile browsers');
                   return;
                 }
                 
                 // Check if we're in a secure context (required for Service Workers)
                 if (!window.isSecureContext && location.hostname !== 'localhost') {
-                  console.log('Service Worker requires HTTPS - not available on HTTP');
                   return;
                 }
                 
@@ -117,11 +115,9 @@ export default function RootLayout({
                     scope: '/'
                   })
                   .then(function(registration) {
-                    console.log('Service Worker registered successfully:', registration);
                     
                     // Check for updates
                     registration.addEventListener('updatefound', function() {
-                      console.log('Service Worker update found');
                     });
                     
                     // Handle registration success
@@ -130,17 +126,12 @@ export default function RootLayout({
                     }));
                   })
                   .catch(function(error) {
-                    console.warn('Service Worker registration failed:', error);
                     
                     // Mobile-specific error handling
                     if (error.name === 'SecurityError') {
-                      console.log('Service Worker blocked by security policy - common on mobile browsers');
                     } else if (error.name === 'NetworkError') {
-                      console.log('Service Worker network error - check mobile connection');
                     } else if (error.message.includes('Failed to fetch')) {
-                      console.log('Service Worker fetch failed - network issue');
                     } else {
-                      console.log('Service Worker error:', error.message);
                     }
                     
                     // Handle registration failure gracefully

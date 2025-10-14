@@ -48,7 +48,6 @@ export function CommissionMarkupSettings() {
           }
         }
       } catch (error) {
-        console.error('Error loading rates:', error)
         // Fallback to defaults
         const defaultRates = getDefaultButcherRates()
         setButcherRates(defaultRates)
@@ -127,7 +126,6 @@ export function CommissionMarkupSettings() {
   const saveRates = async () => {
     setIsSaving(true)
     try {
-      console.log('Saving rates:', butcherRates)
       
       const response = await fetch('/api/rates', {
         method: 'POST',
@@ -139,18 +137,15 @@ export function CommissionMarkupSettings() {
 
       if (response.ok) {
         const result = await response.json()
-        console.log('Save response:', result)
         toast({
           title: "Rates Saved",
           description: "Commission and markup rates have been saved successfully to Google Sheets!",
         })
       } else {
         const errorData = await response.json()
-        console.error('Save error response:', errorData)
         throw new Error(errorData.error || 'Failed to save rates')
       }
     } catch (error) {
-      console.error('Error saving rates:', error)
       
       // Provide more specific error messages
       let errorMessage = "Failed to save rates"

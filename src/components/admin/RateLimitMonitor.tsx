@@ -148,7 +148,6 @@ export function RateLimitMonitor() {
       const result = await response.json()
       setData(result)
     } catch (err) {
-      console.error('Error fetching rate monitor data:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch data')
     } finally {
       setIsLoading(false)

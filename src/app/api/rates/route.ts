@@ -7,7 +7,6 @@ export async function GET() {
     const rates = await getRatesFromSheet();
     return NextResponse.json({ rates });
   } catch (error) {
-    console.error('Error fetching rates:', error);
     return NextResponse.json(
       { error: 'Failed to fetch rates' },
       { status: 500 }
@@ -34,7 +33,6 @@ export async function POST(request: NextRequest) {
       message: 'Rates saved successfully' 
     });
   } catch (error) {
-    console.error('Error saving rates:', error);
     return NextResponse.json(
       { error: 'Failed to save rates' },
       { status: 500 }

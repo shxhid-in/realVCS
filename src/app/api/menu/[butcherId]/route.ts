@@ -18,7 +18,6 @@ export async function GET(
     return NextResponse.json({ menu });
     
   } catch (error: any) {
-    console.error('Error fetching menu:', error);
     return NextResponse.json(
       { error: 'Failed to fetch menu', details: error.message },
       { status: 500 }
@@ -43,7 +42,6 @@ export async function POST(
     return NextResponse.json({ success: true, message: 'Menu saved successfully' });
     
   } catch (error: any) {
-    console.error('Error saving menu:', error);
     return NextResponse.json(
       { error: 'Failed to save menu', details: error.message },
       { status: 500 }

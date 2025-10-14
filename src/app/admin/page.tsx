@@ -121,13 +121,11 @@ export default function AdminPage() {
                 butcherName: freshButchers.find(b => b.id === butcherId)?.name || butcherId
               }));
             } else {
-              console.warn(`Orders response for ${butcherId} is not an array:`, orders);
               return [];
             }
           }
           return [];
         } catch (error) {
-          console.error(`Error fetching orders for ${butcherId}:`, error);
           return [];
         }
       });
@@ -138,7 +136,6 @@ export default function AdminPage() {
       const flatOrders = validResults.flat();
       setAllOrders(flatOrders);
     } catch (error) {
-      console.error('Error fetching all orders:', error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -171,14 +168,11 @@ export default function AdminPage() {
             });
           }
         } else {
-          console.error('Invalid response format from /api/contact');
         }
       } else {
         const errorText = await response.text().catch(() => 'Unknown error');
-        console.error(`Failed to fetch support requests: ${response.status} ${errorText}`);
       }
     } catch (error) {
-      console.error('Error fetching support requests:', error);
     } finally {
       if (isManualRefresh) {
         setIsRefreshing(false);
@@ -202,14 +196,11 @@ export default function AdminPage() {
           setNotifications(data.notifications || []);
           setUnreadNotifications(data.unreadCount || 0);
         } else {
-          console.error('Invalid response format from notifications API');
         }
       } else {
         const errorText = await response.text().catch(() => 'Unknown error');
-        console.error(`Failed to fetch notifications: ${response.status} ${errorText}`);
       }
     } catch (error) {
-      console.error('Error fetching notifications:', error);
     }
   }, []);
 

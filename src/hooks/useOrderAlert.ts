@@ -63,7 +63,6 @@ export const useOrderAlert = () => {
     }, []);
 
     const stopAlert = useCallback(() => {
-        console.log('useOrderAlert: stopAlert called, current isAlerting:', isAlerting);
         setIsAlerting(false);
 
         // Stop audio
@@ -98,10 +97,8 @@ export const useOrderAlert = () => {
 
     const startAlert = useCallback(() => {
         if (isAlerting) {
-            console.log('useOrderAlert: startAlert called but already alerting, ignoring');
             return;
         }
-        console.log('useOrderAlert: startAlert called, starting alert');
         setIsAlerting(true);
 
         // Request notification permission and show browser notification via Service Worker

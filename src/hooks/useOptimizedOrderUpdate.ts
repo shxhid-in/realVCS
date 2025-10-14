@@ -35,7 +35,6 @@ export const useOptimizedOrderUpdate = (): UseOptimizedOrderUpdateReturn => {
 
       return data;
     } catch (error: any) {
-      console.error('Error updating order:', error);
       throw error;
     } finally {
       setIsUpdating(false);

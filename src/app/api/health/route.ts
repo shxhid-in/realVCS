@@ -29,7 +29,6 @@ export async function GET() {
       }
     });
   } catch (error) {
-    console.error('Health check error:', error);
     return NextResponse.json({
       status: 'error',
       timestamp: new Date().toISOString(),

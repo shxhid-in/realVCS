@@ -37,7 +37,6 @@ export const useOrderPolling = ({
     // Circuit breaker: if we've had too many quota errors, wait longer
     const now = Date.now();
     if (now < circuitBreakerUntil.current) {
-      console.log('Circuit breaker active - waiting for quota reset');
       setError('Rate limit circuit breaker active. Waiting for quota reset...');
       return;
     }
@@ -46,7 +45,6 @@ export const useOrderPolling = ({
     const lastCallKey = `lastCall_${butcherId}`;
     const lastCall = getCached(lastCallKey);
     if (lastCall && (now - lastCall) < 4000) {
-      console.log('Debouncing API call - too soon since last request');
       return;
     }
     setCached(lastCallKey, now, 10000);
@@ -109,7 +107,6 @@ export const useOrderPolling = ({
       // Handle quota exceeded errors specifically
       if (err.status === 429 || err.message?.includes('Quota exceeded')) {
         quotaErrorCount.current += 1;
-        console.warn(`Google Sheets API quota exceeded (${quotaErrorCount.current} times), implementing circuit breaker...`);
         
         // Activate circuit breaker after 3 consecutive quota errors
         if (quotaErrorCount.current >= 3) {

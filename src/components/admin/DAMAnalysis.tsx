@@ -110,17 +110,13 @@ const DAMAnalysis: React.FC = () => {
   const loadMonthlyTarget = async () => {
     try {
       setIsLoading(true);
-      console.log('Loading monthly target for:', { selectedMonth, selectedYear });
       const response = await fetch(`/api/dam-analysis/target?month=${selectedMonth}&year=${selectedYear}`);
-      console.log('Target API response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('Target API response data:', data);
         setMonthlyTarget(data);
         setTargetInput(data?.totalTarget?.toString() || '');
       } else {
-        console.log('Target API error:', response.status, response.statusText);
         setMonthlyTarget(null);
         setTargetInput('');
       }
@@ -139,18 +135,14 @@ const DAMAnalysis: React.FC = () => {
   const loadSalesData = async () => {
     try {
       setIsLoading(true);
-      console.log('Loading sales data for:', { selectedMonth, selectedYear });
       const response = await fetch(`/api/dam-analysis/sales?month=${selectedMonth}&year=${selectedYear}`);
-      console.log('Sales API response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('Sales API response data:', data);
         setSalesData(data.salesData || []);
         setButcherSummary(data.butcherSummary || []);
         setWeeklyTargets(data.weeklyTargets || []);
       } else {
-        console.log('Sales API error:', response.status, response.statusText);
         setSalesData([]);
         setButcherSummary([]);
         setWeeklyTargets([]);

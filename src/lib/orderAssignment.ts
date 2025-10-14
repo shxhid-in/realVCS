@@ -196,11 +196,4 @@ export const testOrderAssignment = () => {
     orderTime: new Date()
   };
   
-  console.log('Chicken Order Assignment:', assignOrderToButcher(chickenOrder));
-  console.log('Fish Order Assignment:', assignOrderToButcher(fishOrder));  
-  console.log('Mixed Order Assignment:', assignOrderToButcher(mixedOrder));
-  
-  console.log('Chicken Recommendation:', getRecommendedButcher(chickenOrder));
-  console.log('Fish Recommendation:', getRecommendedButcher(fishOrder));
-  console.log('Mixed Recommendation:', getRecommendedButcher(mixedOrder));
 };

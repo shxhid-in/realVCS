@@ -3,14 +3,11 @@ import { getDAMTargetFromSheet, saveDAMTargetToSheet } from '@/lib/salesSheets';
 
 export async function GET(request: NextRequest) {
   try {
-    console.log('\n=== DAM TARGET API CALLED ===');
     const { searchParams } = new URL(request.url);
     const month = parseInt(searchParams.get('month') || '1');
     const year = parseInt(searchParams.get('year') || new Date().getFullYear());
 
-    console.log('Fetching target for:', { month, year });
     const target = await getDAMTargetFromSheet(month, year);
-    console.log('Target result:', target);
     
     return NextResponse.json(target);
   } catch (error) {

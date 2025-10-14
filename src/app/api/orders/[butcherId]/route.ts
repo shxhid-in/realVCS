@@ -27,7 +27,6 @@ export async function GET(
   { params }: { params: Promise<{ butcherId: string }> }
 ) {
   const requestId = Math.random().toString(36).substr(2, 9);
-  console.log(`[${requestId}] GET /api/orders/${await params.then(p => p.butcherId)} - Request started`);
   
   try {
     const { butcherId } = await params;
@@ -40,15 +39,12 @@ export async function GET(
     const cacheKey = `orders_${butcherId}`;
     const cachedOrders = getCached(cacheKey);
     if (cachedOrders) {
-      console.log(`[${requestId}] Cache hit for ${butcherId} - returning cached data (${cachedOrders.length} orders)`);
       return NextResponse.json({ orders: cachedOrders });
     }
 
     // Request deduplication - if same request is already in progress, wait for it
     if (activeRequests.has(butcherId)) {
-      console.log(`[${requestId}] Deduplicating request for ${butcherId} - waiting for active request`);
       const orders = await activeRequests.get(butcherId);
-      console.log(`[${requestId}] Deduplicated request completed for ${butcherId} (${orders.length} orders)`);
       return NextResponse.json({ orders });
     }
 
@@ -62,7 +58,6 @@ export async function GET(
       // Cache for 30 seconds to reduce API calls during high usage
       setCached(cacheKey, orders, 30000);
       
-      console.log(`[${requestId}] Fresh data fetched for ${butcherId} - ${orders.length} orders (Google Sheets API called)`);
       return NextResponse.json({ orders });
     } finally {
       // Always clean up the active request

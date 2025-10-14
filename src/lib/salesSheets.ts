@@ -85,7 +85,6 @@ const getSalesSpreadsheetId = () => {
 
 // Get butcher name by ID (matching Sales VCS sheet tab names)
 const getButcherName = (butcherId: string): string => {
-  console.log('getButcherName called with butcherId:', butcherId);
   const butcherNames: { [key: string]: string } = {
     'usaj': 'Usaj_Meat_Hub',
     'usaj_mutton': 'Usaj_Mutton_Shop',
@@ -95,7 +94,6 @@ const getButcherName = (butcherId: string): string => {
     'alif': 'Alif'
   };
   const mappedName = butcherNames[butcherId] || butcherId;
-  console.log('Mapped butcher name:', mappedName);
   return mappedName;
 };
 
@@ -109,7 +107,6 @@ export const calculateSalesRevenue = (
 
 // Get butcher name for Menu POS sheet (same as Sales VCS sheet)
 const getMenuButcherName = (butcherId: string): string => {
-  console.log('getMenuButcherName called with butcherId:', butcherId);
   const butcherNames: { [key: string]: string } = {
     'usaj': 'Usaj_Meat_Hub',
     'usaj_mutton': 'Usaj_Mutton_Shop',
@@ -119,7 +116,6 @@ const getMenuButcherName = (butcherId: string): string => {
     'alif': 'Alif'
   };
   const mappedName = butcherNames[butcherId] || butcherId;
-  console.log('Mapped menu butcher name:', mappedName);
   return mappedName;
 };
 
@@ -145,9 +141,6 @@ export const getSellingPriceFromMenu = async (
     const rangeEnd = isMeatButcher ? 'D' : 'E';
     
     // Get menu data from butcher's tab
-    console.log(`Getting menu data from butcher tab: ${menuButcherName} (original: ${butcherId})`);
-    console.log(`Menu POS Spreadsheet ID: ${spreadsheetId}`);
-    console.log(`Butcher type: ${isMeatButcher ? 'Meat' : 'Fish'}, Selling price column: ${sellingPriceColumn} (${rangeEnd})`);
     
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
@@ -155,24 +148,11 @@ export const getSellingPriceFromMenu = async (
     });
 
     const rows = response.data.values || [];
-    console.log(`Found ${rows.length} rows in menu sheet for butcher ${butcherId}`);
-    console.log('First few rows:', rows.slice(0, 3));
-    
     // Check the header row to see what columns are available
     if (rows.length > 0) {
-      console.log('Header row:', rows[0]);
-      console.log(`Selling price column (${rangeEnd}):`, rows[0][sellingPriceColumn]);
     }
     
     // Skip header row
-    console.log(`Searching for item "${itemName}" in ${rows.length - 1} menu items...`);
-    console.log(`Available menu items for ${butcherId}:`);
-    for (let i = 1; i < Math.min(rows.length, 6); i++) {
-      const row = rows[i];
-      if (row.length > 0) {
-        console.log(`  - "${row[0]}" (price: ${row[sellingPriceColumn] || 'N/A'})`);
-      }
-    }
     
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];

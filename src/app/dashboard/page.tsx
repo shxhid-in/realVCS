@@ -25,32 +25,20 @@ function needsWeightDialog(itemName: string): boolean {
 
 // Helper function to get the correct weight to display
 function getDisplayWeight(order: Order, butcherId: string): number {
-    console.log('\n=== GET DISPLAY WEIGHT DEBUG ===');
-    console.log('Order ID:', order.id);
-    console.log('Butcher ID:', butcherId);
-    console.log('Is Meat Butcher:', isMeatButcher(butcherId));
-    console.log('Order itemQuantities:', order.itemQuantities);
-    console.log('Order itemWeights:', order.itemWeights);
-    console.log('Order pickedWeight:', order.pickedWeight);
-    
     if (isMeatButcher(butcherId)) {
         // For meat butchers, use itemQuantities if available, otherwise use pickedWeight
         if (order.itemQuantities && Object.keys(order.itemQuantities).length > 0) {
             const totalWeight = Object.values(order.itemQuantities).reduce((sum, weight) => sum + parseFloat(weight), 0);
-            console.log('Using itemQuantities, total weight:', totalWeight);
             return totalWeight;
         }
     } else {
         // For fish butchers, use itemWeights if available, otherwise use pickedWeight
         if (order.itemWeights && Object.keys(order.itemWeights).length > 0) {
             const totalWeight = Object.values(order.itemWeights).reduce((sum, weight) => sum + parseFloat(weight), 0);
-            console.log('Using itemWeights, total weight:', totalWeight);
             return totalWeight;
         }
     }
     // Fallback to pickedWeight
-    console.log('Using fallback pickedWeight:', order.pickedWeight);
-    console.log('=====================================\n');
     return order.pickedWeight || 0;
 }
 
@@ -403,9 +391,6 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
             
             if (needsWeightItems.length > 0) {
                 // Meat butchers with chicken items: Need to enter preparation weight
-                console.log('\n=== MEAT BUTCHER WITH CHICKEN ITEMS ===');
-                console.log('Items needing weight dialog:', needsWeightItems.map(item => item.name));
-                console.log('=====================================\n');
                 
                 dialogOpenRef.current = true;
                 setCurrentDialogOrder(order);
@@ -519,11 +504,6 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
             // All weights collected, update the order
             const totalPickedWeight = Object.values(newWeights).reduce((sum: number, w) => sum + parseFloat(w as string), 0);
             
-            console.log('\n=== ORDER ACCEPTANCE DEBUG ===');
-            console.log('Weights collected:', newWeights);
-            console.log('Total picked weight:', totalPickedWeight);
-            console.log('Order items:', order.items.map(item => ({ name: item.name, quantity: item.quantity })));
-            console.log('Butcher type:', isMeatButcher(butcherId) ? 'meat' : 'fish');
             
             const updatedOrder: Order = { 
                 ...order, 
@@ -536,13 +516,9 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
             if (isMeatButcher(butcherId)) {
                 // Meat butchers: Store in itemQuantities
                 updatedOrder.itemQuantities = newWeights;
-                console.log('Meat butcher - stored in itemQuantities:', updatedOrder.itemQuantities);
-                console.log('Meat butcher - updatedOrder keys:', Object.keys(updatedOrder));
             } else {
                 // Fish butchers: Store in itemWeights
                 updatedOrder.itemWeights = newWeights;
-                console.log('Fish butcher - stored in itemWeights:', updatedOrder.itemWeights);
-                console.log('Fish butcher - updatedOrder keys:', Object.keys(updatedOrder));
             }
             
             console.log('Final updatedOrder before onUpdate:', {

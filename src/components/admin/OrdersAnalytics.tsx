@@ -79,11 +79,9 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
       const flatOrders = validResults.flat()
       
       // Log for debugging duplicate orders
-      console.log('Total orders fetched:', flatOrders.length)
       const orderIds = flatOrders.map(o => o.id)
       const duplicateIds = orderIds.filter((id, index) => orderIds.indexOf(id) !== index)
       if (duplicateIds.length > 0) {
-        console.log('Duplicate order IDs found:', [...new Set(duplicateIds)])
       }
       
       setAllOrders(flatOrders)
@@ -298,7 +296,6 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
     try {
       const purchasePrices = await getItemPurchasePricesFromSheet(butcherId, [itemName]);
       const price = purchasePrices[itemName] || 0;
-      console.log(`Purchase price for ${itemName} in ${butcherId}: ₹${price}`);
       return price;
     } catch (error) {
       console.error(`Error getting purchase price for ${itemName}:`, error);
@@ -308,32 +305,18 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
 
   // Calculate revenue based on actual purchase prices from menu
   const calculateOrderRevenue = async (order: Order): Promise<number> => {
-    console.log(`\n=== ADMIN ANALYTICS REVENUE CALCULATION for Order ${order.id} ===`);
-    console.log('Order details:', {
-      orderId: order.id,
-      hasRevenue: !!order.revenue,
-      revenue: order.revenue,
-      hasItemRevenues: !!order.itemRevenues,
-      itemRevenues: order.itemRevenues,
-      pickedWeight: order.pickedWeight,
-      status: order.status,
-      items: order.items.map(item => ({ name: item.name, quantity: item.quantity }))
-    });
     
     // Use stored revenue if available
     if (order.revenue) {
-      console.log(`✅ Using stored revenue: ₹${order.revenue}`);
       return order.revenue;
     }
     
     // Use item revenues if available (sum of all item revenues)
     if (order.itemRevenues) {
       const itemRevenueSum = Object.values(order.itemRevenues).reduce((sum, revenue) => sum + revenue, 0);
-      console.log(`✅ Using item revenues sum: ₹${itemRevenueSum}`, order.itemRevenues);
       return itemRevenueSum;
     }
     
-    console.log(`⚠️ No stored revenue found, calculating from purchase prices`);
     
     // Calculate revenue using actual purchase prices from menu
     let totalRevenue = 0;
@@ -351,7 +334,6 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
           const itemWeight = orderWeight * itemProportion;
           const itemRevenue = itemWeight * purchasePrice;
           
-          console.log(`Item ${item.name}: ${itemWeight}kg × ₹${purchasePrice} = ₹${itemRevenue}`);
           totalRevenue += itemRevenue;
         } else {
           console.warn(`⚠️ No purchase price found for item: ${item.name} in butcher: ${order.butcherId}`);
@@ -361,7 +343,6 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
       }
     }
     
-    console.log(`✅ Calculated total revenue: ₹${totalRevenue}`);
     return totalRevenue;
   };
 

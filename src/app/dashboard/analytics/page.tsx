@@ -82,10 +82,8 @@ export default function AnalyticsPage() {
   // Enhanced refetch that clears cache
   const forceRefresh = useCallback(async () => {
     if (isAdmin) {
-      console.log('Analytics: Force refreshing all orders for admin');
       await fetchAllOrders();
     } else if (butcher?.id) {
-      console.log('Analytics: Clearing cache and force refreshing');
       // Clear all possible cache keys
       clearCache(`orders_${butcher.id}`);
       clearCache(`orders_${butcher.id}_*`);
@@ -146,7 +144,6 @@ export default function AnalyticsPage() {
   // Force refresh on component mount to get latest data
   useEffect(() => {
     if (butcher?.id) {
-      console.log('Analytics: Force refreshing data on mount');
       forceRefresh();
     }
   }, [butcher?.id, forceRefresh]);
@@ -193,21 +190,9 @@ export default function AnalyticsPage() {
   
   // Calculate revenue based on actual stored revenue or item revenues
   const calculateOrderRevenue = (order: Order): number => {
-    console.log(`\n=== ANALYTICS REVENUE CALCULATION for Order ${order.id} ===`);
-    console.log('Order details:', {
-      orderId: order.id,
-      hasRevenue: !!order.revenue,
-      revenue: order.revenue,
-      hasItemRevenues: !!order.itemRevenues,
-      itemRevenues: order.itemRevenues,
-      pickedWeight: order.pickedWeight,
-      status: order.status,
-      items: order.items.map(item => ({ name: item.name, quantity: item.quantity }))
-    });
     
     // Use stored revenue if available
     if (order.revenue) {
-      console.log(`✅ Using stored revenue: ₹${order.revenue}`);
       return order.revenue;
     }
     

@@ -46,14 +46,6 @@ export const getGoogleSheetsClient = async () => {
         cleanPrivateKey = `-----BEGIN PRIVATE KEY-----\n${cleanPrivateKey}\n-----END PRIVATE KEY-----`;
     }
     
-    console.log('Google Sheets Auth Debug:', {
-        clientEmail: clientEmail.replace(/"/g, ''),
-        privateKeyLength: cleanPrivateKey.length,
-        privateKeyStart: cleanPrivateKey.substring(0, 50),
-        privateKeyEnd: cleanPrivateKey.substring(cleanPrivateKey.length - 50),
-        hasBeginMarker: cleanPrivateKey.includes('-----BEGIN PRIVATE KEY-----'),
-        hasEndMarker: cleanPrivateKey.includes('-----END PRIVATE KEY-----')
-    });
     
     try {
     const auth = new google.auth.GoogleAuth({
@@ -65,7 +57,6 @@ export const getGoogleSheetsClient = async () => {
     });
 
     const client = await auth.getClient();
-        console.log('Google Sheets client created successfully');
     return google.sheets({ version: 'v4', auth: client as any });
     } catch (error) {
         console.error('Error creating Google Sheets client:', error);
@@ -131,14 +122,6 @@ export const getButcherSheetsClient = async (butcherId: string) => {
 
         // Debug private key format
         const processedPrivateKey = credentials.privateKey.replace(/\\n/g, '\n');
-        console.log(`Butcher ${butcherId} Auth Debug:`, {
-            clientEmail: credentials.clientEmail,
-            privateKeyLength: processedPrivateKey.length,
-            privateKeyStart: processedPrivateKey.substring(0, 50),
-            privateKeyEnd: processedPrivateKey.substring(processedPrivateKey.length - 50),
-            hasBeginMarker: processedPrivateKey.includes('-----BEGIN PRIVATE KEY-----'),
-            hasEndMarker: processedPrivateKey.includes('-----END PRIVATE KEY-----')
-        });
 
         const auth = new google.auth.GoogleAuth({
             credentials: {
@@ -201,7 +184,6 @@ const parseArrayFromSheet = (str: string): string[] => {
 const populateDefaultItems = async (butcherId: string) => {
     try {
         if (!MENU_POS_SHEET_ID) {
-            console.log('MENU_POS_SHEET_ID not configured, skipping population');
             return;
         }
 
@@ -209,7 +191,6 @@ const populateDefaultItems = async (butcherId: string) => {
         const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
         
         if (!tabName) {
-            console.log(`No tab found for butcher: ${butcherId}, skipping population`);
             return;
         }
 
@@ -217,7 +198,6 @@ const populateDefaultItems = async (butcherId: string) => {
         const defaultItems = getDefaultItemsForButcher(butcherId);
         
         if (defaultItems.length === 0) {
-            console.log(`No default items defined for butcher: ${butcherId}`);
             return;
         }
 
@@ -260,7 +240,6 @@ const populateDefaultItems = async (butcherId: string) => {
             }
         });
 
-        console.log(`Populated ${defaultItems.length} default items for ${butcherId}`);
     } catch (error) {
         console.error('Error populating default items:', error);
     }
@@ -350,7 +329,6 @@ const fetchPurchasePrices = async (butcherId: string): Promise<Record<string, nu
             }
         }
 
-        console.log(`Fetched purchase prices for ${butcherId}:`, purchasePrices);
         return purchasePrices;
 
     } catch (error) {

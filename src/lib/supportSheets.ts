@@ -31,7 +31,6 @@ export const saveSupportRequest = async (request: Omit<SupportRequest, 'id' | 'c
     };
 
     if (!SUPPORT_SHEET_ID) {
-      console.warn('SUPPORT_SHEET_ID not configured, using fallback storage');
       // Use fallback storage
       fallbackSupportRequests.push(fullRequest);
       return requestId;
@@ -115,7 +114,6 @@ export const saveSupportRequest = async (request: Omit<SupportRequest, 'id' | 'c
 export const getSupportRequests = async (butcherId?: string): Promise<SupportRequest[]> => {
   try {
     if (!SUPPORT_SHEET_ID) {
-      console.warn('SUPPORT_SHEET_ID not configured, using fallback storage');
       // Use fallback storage
       let requests = fallbackSupportRequests;
       if (butcherId) {
@@ -148,7 +146,6 @@ export const getSupportRequests = async (butcherId?: string): Promise<SupportReq
           try {
             packingRequests = JSON.parse(packingRequestsStr);
           } catch (e) {
-            console.warn('Failed to parse packing requests:', packingRequestsStr);
           }
         }
 
@@ -173,7 +170,6 @@ export const getSupportRequests = async (butcherId?: string): Promise<SupportReq
       return requests;
     } catch (error) {
       // Tab doesn't exist yet, return empty array
-      console.warn('Support requests tab not found, returning empty array');
       return [];
     }
   } catch (error: any) {
@@ -190,7 +186,6 @@ export const getSupportRequests = async (butcherId?: string): Promise<SupportReq
 export const updateSupportRequest = async (requestId: string, updates: Partial<SupportRequest>): Promise<void> => {
   try {
     if (!SUPPORT_SHEET_ID) {
-      console.warn('SUPPORT_SHEET_ID not configured, using fallback storage');
       // Use fallback storage
       const index = fallbackSupportRequests.findIndex(req => req.id === requestId);
       if (index !== -1) {
@@ -267,7 +262,6 @@ export const updateSupportRequest = async (requestId: string, updates: Partial<S
 export const deleteSupportRequest = async (requestId: string): Promise<void> => {
   try {
     if (!SUPPORT_SHEET_ID) {
-      console.warn('SUPPORT_SHEET_ID not configured, using fallback storage');
       // Use fallback storage
       fallbackSupportRequests = fallbackSupportRequests.filter(req => req.id !== requestId);
       return;

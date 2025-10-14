@@ -36,7 +36,6 @@ export default function DashboardLayout({
   
   // Create a global stopAlert function that can be called from anywhere
   const globalStopAlert = useCallback(() => {
-    console.log('Global stopAlert called immediately');
     stopAlert();
   }, [stopAlert]);
   
@@ -68,16 +67,13 @@ export default function DashboardLayout({
 
   // Global notification system - works on all tabs
   useEffect(() => {
-    console.log('Global alert system - newOrders.length:', newOrders.length, 'prevNewOrderCount:', prevNewOrderCount, 'isAlerting:', isAlerting);
     
     if (newOrders.length > prevNewOrderCount) {
-      console.log('Starting global alert - new orders detected');
       startAlert();
     }
     
     // Stop alert when all orders are accepted or rejected (no new orders)
     if (newOrders.length === 0 && prevNewOrderCount > 0) {
-      console.log('Stopping global alert - no more new orders');
       stopAlert();
     }
     

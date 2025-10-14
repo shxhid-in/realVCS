@@ -64,7 +64,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (error) {
-      console.error("Could not parse stored user data", error);
       localStorage.removeItem('user');
       localStorage.removeItem('userType');
     } finally {

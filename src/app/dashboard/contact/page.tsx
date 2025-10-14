@@ -109,7 +109,6 @@ export default function ContactPage() {
       fetchSupportHistory();
       
     } catch (error) {
-      console.error('Error submitting contact form:', error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -152,7 +151,6 @@ export default function ContactPage() {
         throw new Error(`Failed to fetch support history: ${response.status} ${errorText}`);
       }
     } catch (error) {
-      console.error('Error fetching support history:', error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -210,7 +208,6 @@ export default function ContactPage() {
         }
       }
     } catch (error) {
-      console.error('Error deleting support request:', error);
       toast({
         variant: "destructive",
         title: "Error",

@@ -385,7 +385,6 @@ export default function MenuManagementPage() {
         description: "Full menu loaded with saved prices from Google Sheet.",
       });
     } catch (error: any) {
-      console.error("Error loading menu from sheet:", error);
       toast({
         variant: "destructive",
         title: "Load Failed",
@@ -414,7 +413,6 @@ export default function MenuManagementPage() {
         });
       }
     } catch (error: any) {
-      console.error("Error resetting to mock data:", error);
       toast({
         variant: "destructive",
         title: "Reset Failed",

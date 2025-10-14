@@ -51,7 +51,6 @@ export async function POST(request: NextRequest) {
     // 3. Send push notification
     // 4. Send real-time notification via WebSocket
 
-    console.log('New notification created:', notification);
 
     return NextResponse.json({
       success: true,
@@ -99,7 +98,6 @@ export async function GET(request: NextRequest) {
     // Limit results
     filteredNotifications = filteredNotifications.slice(0, limit);
 
-    console.log(`Returning ${filteredNotifications.length} notifications (${notifications.filter(n => !n.read).length} unread)`);
 
     return NextResponse.json({
       success: true,
@@ -146,7 +144,6 @@ export async function PUT(request: NextRequest) {
       updatedAt: new Date().toISOString()
     };
 
-    console.log('Notification updated:', notifications[notificationIndex]);
 
     return NextResponse.json({
       success: true,

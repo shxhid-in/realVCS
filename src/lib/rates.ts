@@ -109,30 +109,18 @@ export const getMarkupRate = (butcherId: string, category: string, customRates?:
     ));
   }
   
-  // Debug logging
-  console.log(`getMarkupRate for ${butcherId}, category "${category}":`, {
-    originalCategory: category,
-    categoryLower,
-    availableRates: rates.filter(r => r.butcherId === butcherId).map(r => r.category),
-    foundRate: rate,
-    rateValue: rate?.rate,
-    usingCustomRates: !!customRates
-  });
   
   // If rate not found, use appropriate default based on category
   if (!rate) {
     // Beef and mutton items have 0% markup by default
     if (categoryLower === 'beef' || categoryLower === 'mutton' || 
         categoryLower.includes('beef') || categoryLower.includes('mutton')) {
-      console.log(`Using 0% markup for beef/mutton category: ${categoryLower}`);
       return 0.00;
     }
     // All other items have 5% markup by default
-    console.log(`Using 5% markup for category: ${categoryLower}`);
     return 0.05;
   }
   
-  console.log(`Using custom markup rate ${(rate.rate * 100).toFixed(1)}% for ${butcherId}, category: ${categoryLower}`);
   return rate.rate;
 };
 

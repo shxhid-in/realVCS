@@ -37,7 +37,6 @@ export async function POST(request: NextRequest) {
     // Save to Google Sheets
     const requestId = await saveSupportRequest(supportRequest);
 
-    console.log('New support request saved:', { ...supportRequest, id: requestId });
 
     return NextResponse.json({
       success: true,
@@ -101,7 +100,6 @@ export async function PUT(request: NextRequest) {
       adminResponse: adminResponse || undefined
     });
 
-    console.log('Support request updated:', { requestId, status, adminResponse });
 
     return NextResponse.json({
       success: true,
@@ -132,7 +130,6 @@ export async function DELETE(request: NextRequest) {
     // Delete the request from Google Sheets
     await deleteSupportRequest(requestId);
 
-    console.log('Support request deleted:', requestId);
 
     return NextResponse.json({
       success: true,

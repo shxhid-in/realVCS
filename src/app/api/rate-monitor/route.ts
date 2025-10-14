@@ -90,7 +90,6 @@ export async function GET() {
       }
     });
   } catch (error) {
-    console.error('Rate monitor API error:', error);
     return NextResponse.json({
       error: 'Failed to fetch rate monitoring data',
       details: error instanceof Error ? error.message : 'Unknown error'

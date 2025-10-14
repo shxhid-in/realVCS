@@ -50,7 +50,6 @@ export const useButcherEarnings = ({
       const result = await getButcherEarnings(butcherId, orderItems);
       setEarnings(result);
     } catch (err: any) {
-      console.error('Error fetching butcher earnings:', err);
       
       // Handle quota exceeded errors specifically
       if (err.status === 429 || err.message?.includes('Quota exceeded')) {

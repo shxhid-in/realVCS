@@ -2,24 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { saveSalesDataToSheetSimple } from '@/lib/salesSheets';
 
 export async function POST(request: NextRequest) {
-  console.log('\n=== SALES DATA API CALLED ===');
-  console.log('Request URL:', request.url);
-  console.log('Request method:', request.method);
   
   try {
-    console.log('Attempting to parse request body...');
     const body = await request.json();
-    console.log('Raw body received:', JSON.stringify(body, null, 2));
     
     const { orderId, butcherId, orderData } = body;
 
-    console.log('API received data:', { 
-      orderId, 
-      butcherId, 
-      orderDataKeys: Object.keys(orderData || {}),
-      orderDataItems: orderData?.items?.length || 0,
-      orderDataStatus: orderData?.status
-    });
 
     if (!orderId || !butcherId || !orderData) {
       console.error('Missing required fields:', { orderId: !!orderId, butcherId: !!butcherId, orderData: !!orderData });
@@ -29,9 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('Calling saveSalesDataToSheetSimple...');
     await saveSalesDataToSheetSimple(orderId, butcherId, orderData);
-    console.log('saveSalesDataToSheetSimple completed successfully');
     
     return NextResponse.json({ success: true, message: 'Sales data saved successfully' });
   } catch (error) {

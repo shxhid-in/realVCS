@@ -50,7 +50,6 @@ export async function GET(
       try {
         orderItems = JSON.parse(decodeURIComponent(orderItemsParam));
       } catch (error) {
-        console.error('Error parsing order items:', error);
       }
     }
 
@@ -62,7 +61,6 @@ export async function GET(
     return NextResponse.json({ prices });
     
   } catch (error: any) {
-    console.error('Error fetching purchase prices:', error);
     
     // Return specific error for quota exceeded
     if (error.status === 429 || error.message?.includes('Quota exceeded')) {
