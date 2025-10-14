@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.bezgofresh.vcs",
+    "sha256_cert_fingerprints": [
+      "5E:F6:13:5E:DB:CD:6C:D0:BE:C2:6D:89:CF:3D:94:F9:DC:6E:E5:2F:2A:E9:E8:04:40:20:0B:32:D4:E9:95:01"
+    ]
+  }
+}]
