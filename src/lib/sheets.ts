@@ -5,6 +5,7 @@ import type { Order, OrderItem, MenuCategory, Butcher, MenuItem, CommissionRate,
 import { freshButchers as butchers, getFishItemFullName } from './freshMockData';
 import { getDefaultButcherRates, getCommissionRate, getMarkupRate } from './rates';
 import { measureApiCall } from './apiMonitor';
+import {normalizeItemName} from './matchingUtils';
 // Note: Caching removed from server actions due to Next.js restrictions
 
 // Sheet configurations
@@ -18,7 +19,9 @@ const BUTCHER_TABS = {
   'alif': 'Alif',
   'kak': 'KAK',
   'ka_sons': 'KA_Sons',
-  'usaj_mutton': 'Usaj_Mutton_Shop'
+  'usaj_mutton': 'Usaj_Mutton_Shop',
+  'test_meat': 'Test_Meat_Butcher',
+  'test_fish': 'Test_Fish_Butcher'
 } as const;
 
 export const getGoogleSheetsClient = async () => {
@@ -116,11 +119,9 @@ export const getButcherSheetsClient = async (butcherId: string) => {
         const credentials = SERVICE_ACCOUNT_MAPPING.butcher[butcherId as keyof typeof SERVICE_ACCOUNT_MAPPING.butcher];
         
         if (!credentials?.clientEmail || !credentials?.privateKey) {
-            console.warn(`No butcher-specific credentials found for ${butcherId}, falling back to default`);
             return getGoogleSheetsClient();
         }
 
-        // Debug private key format
         const processedPrivateKey = credentials.privateKey.replace(/\\n/g, '\n');
 
         const auth = new google.auth.GoogleAuth({
@@ -132,10 +133,10 @@ export const getButcherSheetsClient = async (butcherId: string) => {
         });
 
         const client = await auth.getClient();
-        return google.sheets({ version: 'v4', auth: client as any });
+        const sheetsClient = google.sheets({ version: 'v4', auth: client as any });
+        return sheetsClient;
     } catch (error) {
-        console.error(`Error creating butcher-specific Google Sheets client for ${butcherId}:`, error);
-        // Fallback to default client
+        console.error(`[Sheets] Error creating butcher-specific client for ${butcherId}:`, error);
         return getGoogleSheetsClient();
     }
 };
@@ -178,7 +179,109 @@ const parseArrayFromSheet = (str: string): string[] => {
     return str ? str.split(',').map(item => item.trim()) : [];
 };
 
-// Note: Commission rates are now managed dynamically through the rates system
+/**
+ * Get current date and time in IST (India Standard Time)
+ * Works regardless of server location
+ * IST is UTC+5:30
+ */
+const getISTDate = (): string => {
+    const now = new Date();
+    // Get UTC time and add IST offset (5:30 = 5.5 hours)
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    const istTime = new Date(utcTime + istOffset);
+    
+    // Format as DD/MM/YYYY
+    const day = String(istTime.getUTCDate()).padStart(2, '0');
+    const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+    const year = istTime.getUTCFullYear();
+    
+    return `${day}/${month}/${year}`;
+};
+
+/**
+ * Get current date and time in IST (India Standard Time) in human-readable format
+ * Format: DD/MM/YYYY HH:MM:SS
+ */
+const getISTDateTime = (date?: Date | string | number): string => {
+    // Normalize date to Date object
+    let dateToUse: Date;
+    if (!date) {
+        dateToUse = new Date();
+    } else if (date instanceof Date) {
+        dateToUse = date;
+    } else if (typeof date === 'string' || typeof date === 'number') {
+        dateToUse = new Date(date);
+    } else {
+        dateToUse = new Date();
+    }
+    
+    // Validate the date
+    if (isNaN(dateToUse.getTime())) {
+        dateToUse = new Date(); // Fallback to current date if invalid
+    }
+    
+    // Get UTC time and add IST offset (5:30 = 5.5 hours)
+    const utcTime = dateToUse.getTime() + (dateToUse.getTimezoneOffset() * 60 * 1000);
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    const istTime = new Date(utcTime + istOffset);
+    
+    // Format as DD/MM/YYYY HH:MM:SS
+    const day = String(istTime.getUTCDate()).padStart(2, '0');
+    const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+    const year = istTime.getUTCFullYear();
+    const hours = String(istTime.getUTCHours()).padStart(2, '0');
+    const minutes = String(istTime.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(istTime.getUTCSeconds()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+};
+
+/**
+ * Calculate completion time in minutes
+ * Returns "Xmin" if within timer (20 minutes), or actual time if exceeded
+ */
+const getCompletionTime = (startTime?: Date | string | number, endTime?: Date | string | number): string => {
+    if (!startTime || !endTime) {
+        return '';
+    }
+    
+    // Normalize dates to Date objects
+    let start: Date;
+    let end: Date;
+    
+    if (startTime instanceof Date) {
+        start = startTime;
+    } else if (typeof startTime === 'string' || typeof startTime === 'number') {
+        start = new Date(startTime);
+    } else {
+        return '';
+    }
+    
+    if (endTime instanceof Date) {
+        end = endTime;
+    } else if (typeof endTime === 'string' || typeof endTime === 'number') {
+        end = new Date(endTime);
+    } else {
+        return '';
+    }
+    
+    // Validate dates
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return '';
+    }
+    
+    const diffMs = end.getTime() - start.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    
+    // If within 20 minutes, return as "Xmin"
+    if (diffMinutes <= 20) {
+        return `${diffMinutes}min`;
+    }
+    
+    // If exceeded, return actual completion time in IST
+    return getISTDateTime(end);
+};
 
 // Function to populate empty sheets with default items
 const populateDefaultItems = async (butcherId: string) => {
@@ -202,7 +305,7 @@ const populateDefaultItems = async (butcherId: string) => {
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton'].includes(butcherId);
+        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
         
         // Different column structures based on butcher type
         const range = isMeatButcher ? `${tabName}!A2:F` : `${tabName}!A2:G`;
@@ -281,7 +384,7 @@ const fetchPurchasePrices = async (butcherId: string): Promise<Record<string, nu
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton'].includes(butcherId);
+        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
         
         // Different column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
@@ -311,20 +414,21 @@ const fetchPurchasePrices = async (butcherId: string): Promise<Record<string, nu
 
             const purchasePrice = parseFloat(purchasePriceStr) || 0;
             if (purchasePrice > 0) {
-                // For fish butchers, extract English name from format "Malayalam - English - Tamil"
+                // Extract English name (middle part) from three-language format
                 let cleanItemName = itemName;
-                if (isFishButcher(butcherId) && itemName.includes(' - ')) {
+                if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
                     const nameParts = itemName.split(' - ');
-                    cleanItemName = nameParts.length >= 2 ? nameParts[1].trim() : itemName;
+                    cleanItemName = nameParts[1].trim(); // English name is in the middle
                 }
+                // For meat items (single name), use the name directly
                 
-                // For fish butchers with sizes, include size in the key for more precise matching
-                if (isFishButcher(butcherId) && size && size !== 'default') {
-                    const keyWithSize = `${cleanItemName.toLowerCase().trim()} (${size})`;
+                // For items with sizes, include size in the key for more precise matching
+                if (size && size !== 'default') {
+                    const keyWithSize = `${cleanItemName.toLowerCase().trim()} (${size.toLowerCase()})`;
                     purchasePrices[keyWithSize] = purchasePrice;
                 }
                 
-                // Always store the base name without size for fallback matching
+                // Always store the base name without size for fallback matching (case-insensitive)
                 purchasePrices[cleanItemName.toLowerCase().trim()] = purchasePrice;
             }
         }
@@ -414,16 +518,21 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton'].includes(butcherId);
+        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
         
         // Updated column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
         // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns)
         const range = isMeatButcher ? `${tabName}!A2:F` : `${tabName}!A2:G`;
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: MENU_POS_SHEET_ID,
-            range,
-        });
+        const response = await measureApiCall(
+            `getOrders:${butcherId}`,
+            'GET',
+            () => sheets.spreadsheets.values.get({
+                spreadsheetId: MENU_POS_SHEET_ID,
+                range,
+            }),
+            { sheetId: MENU_POS_SHEET_ID, sheetName: 'Menu POS Sheet' }
+        );
 
         const rows = response.data.values || [];
         const prices: {[itemName: string]: number} = {};
@@ -466,7 +575,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
             if (itemName && purchasePrice) {
                 // Match item names (case sensitive for exact matching)
                 const baseItemName = itemName.trim(); // Keep original case for exact matching
-                const price = parseFloat(purchasePrice) || 450; // Default fallback
+                const price = parseFloat(purchasePrice) || 0; // Default fallback
                 
                 console.log('Checking menu item:', { 
                     itemName, 
@@ -483,12 +592,13 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                 for (const orderItemName of itemNames) {
                     const baseOrderItemName = orderItemName.trim(); // Keep original case for exact matching
                     
-                    // Extract English name from order item name if it's in fish format
+                    // Extract English name (middle part) from three-language format
                     let orderEnglishName = baseOrderItemName;
                     if (orderItemName.includes(' - ') && orderItemName.split(' - ').length >= 3) {
                         const nameParts = orderItemName.split(' - ');
-                        orderEnglishName = nameParts[1].trim(); // Keep original case
+                        orderEnglishName = nameParts[1].trim(); // English name is in the middle
                     }
+                    // For meat items (single name), use the name directly
                     
                     // Get order item details for better matching
                     const orderItem = orderItems?.find(item => item.name === orderItemName);
@@ -500,73 +610,57 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                     
                     if (isMeatButcher) {
                         // Meat butchers: Exact case-sensitive and space-sensitive matching (no size consideration)
-                        console.log(`Meat butcher matching: "${baseItemName}" vs "${baseOrderItemName}": ${baseItemName === baseOrderItemName}`);
-                        if (baseItemName === baseOrderItemName) {
+                        console.log(`Meat butcher matching: "${baseItemName}" vs "${baseOrderItemName}": ${baseItemName.toLowerCase() === baseOrderItemName.toLowerCase()}`);
+                        if (baseItemName.toLowerCase() === baseOrderItemName.toLowerCase()) {
                             isMatch = true;
-                            console.log(`✅ Exact match found for meat butcher: "${baseItemName}"`);
-                        } else {
-                            // Try case-insensitive matching for meat butchers
-                            if (baseItemName.toLowerCase() === baseOrderItemName.toLowerCase()) {
-                                isMatch = true;
-                                console.log(`✅ Case-insensitive match found for meat butcher: "${baseItemName}"`);
-                            }
+                            console.log(`✅ Case-insensitive match found for meat butcher: "${baseItemName}"`);
                         }
                     } else {
                         // Fish butchers: Enhanced matching with size consideration (case-sensitive and space-sensitive)
                         
-                        // First, try exact case-sensitive match with size: "Mackerel Small"
+                        // PRIORITY 1: Try size-specific matching first (most accurate)
                         if (orderItemSize && orderItemSize !== 'default' && size && size !== 'default') {
-                            const itemWithSize = `${baseItemName} ${size}`;
-                            const orderWithSize = `${baseOrderItemName} ${orderItemSize}`;
+                            // Try format: "Trevally (Small)" - parentheses format
+                            const itemWithParentheses = `${baseItemName} (${size})`;
+                            const orderWithParentheses = `${baseOrderItemName} (${orderItemSize})`;
                             
-                            if (itemWithSize === orderWithSize) {
-                            isMatch = true;
-                                console.log(`✅ Fish butcher exact size match: "${itemWithSize}" = "${orderWithSize}"`);
+                            if (itemWithParentheses.toLowerCase() === orderWithParentheses.toLowerCase()) {
+                                isMatch = true;
+                                console.log(`✅ Fish butcher parentheses size match: "${itemWithParentheses}" = "${orderWithParentheses}"`);
                             }
                             
-                            // Try with parentheses: "Mackerel (Small)"
+                            // Try format: "Trevally Small" - space format
                             if (!isMatch) {
-                                const itemWithParentheses = `${baseItemName} (${size})`;
-                                const orderWithParentheses = `${baseOrderItemName} (${orderItemSize})`;
+                                const itemWithSize = `${baseItemName} ${size}`;
+                                const orderWithSize = `${baseOrderItemName} ${orderItemSize}`;
                                 
-                                if (itemWithParentheses === orderWithParentheses) {
-                            isMatch = true;
-                                    console.log(`✅ Fish butcher parentheses size match: "${itemWithParentheses}" = "${orderWithParentheses}"`);
-                                }
-                            }
-                            
-                            // Try case-insensitive size match
-                            if (!isMatch) {
-                                const itemWithSizeLower = `${baseItemName.toLowerCase()} ${size.toLowerCase()}`;
-                                const orderWithSizeLower = `${baseOrderItemName.toLowerCase()} ${orderItemSize.toLowerCase()}`;
-                                
-                                if (itemWithSizeLower === orderWithSizeLower) {
+                                if (itemWithSize.toLowerCase() === orderWithSize.toLowerCase()) {
                                     isMatch = true;
-                                    console.log(`✅ Fish butcher case-insensitive size match: "${itemWithSizeLower}" = "${orderWithSizeLower}"`);
+                                    console.log(`✅ Fish butcher space size match: "${itemWithSize}" = "${orderWithSize}"`);
                                 }
                             }
                         }
                         
-                        // If no size match, try exact case-sensitive match with English name
-                        if (!isMatch && baseItemName === orderEnglishName) {
+                        // PRIORITY 2: If no size-specific match, try English name with size validation
+                        if (!isMatch && baseItemName.toLowerCase() === orderEnglishName.toLowerCase()) {
                             // Check if sizes match (if both have sizes)
                             if (size && size !== 'default' && orderItemSize && orderItemSize !== 'default') {
-                                if (size.toLowerCase() === orderItemSize) {
+                                if (size.toLowerCase() === orderItemSize.toLowerCase()) {
                                     isMatch = true;
                                     console.log(`✅ Fish butcher English name with size match: "${baseItemName}" + "${size}"`);
                                 }
                             } else if (!size || size === 'default' || !orderItemSize || orderItemSize === 'default') {
-                                // If either doesn't have size, match by name only
+                                // If either doesn't have size, match by name only (case-insensitive)
                                 isMatch = true;
-                                console.log(`✅ Fish butcher English name match: "${baseItemName}"`);
+                                console.log(`✅ Fish butcher English name match (case-insensitive): "${baseItemName}"`);
                             }
                         }
                         
                         // No longer using "meat" suffix for fish butchers' meat items
                         // Fish butchers will match items using original names
                         
-                        // Try exact match with original item name (case-sensitive)
-                        if (!isMatch && baseItemName === baseOrderItemName) {
+                        // Try exact match with original item name (case-insensitive)
+                        if (!isMatch && baseItemName.toLowerCase() === baseOrderItemName.toLowerCase()) {
                             // Check size match
                             if (size && size !== 'default' && orderItemSize && orderItemSize !== 'default') {
                                 if (size.toLowerCase() === orderItemSize) {
@@ -578,9 +672,9 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                                 console.log(`✅ Fish butcher original name match: "${baseItemName}"`);
                             }
                         }
-                        // If meat category item, try original name with "meat" suffix (case-sensitive)
+                        // If meat category item, try original name with "meat" suffix (case-insensitive)
                         else if (orderItemCategory && orderItemCategory.toLowerCase().includes('meat') && 
-                                 baseItemName === `${baseOrderItemName} meat`) {
+                                 baseItemName.toLowerCase() === `${baseOrderItemName} meat`.toLowerCase()) {
                             // Check size match
                             if (size && size !== 'default' && orderItemSize && orderItemSize !== 'default') {
                                 if (size.toLowerCase() === orderItemSize) {
@@ -605,12 +699,12 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                         isMatch,
                         sizeMatch: size && size !== 'default' && orderItemSize && orderItemSize !== 'default' ? 
                                    size.toLowerCase() === orderItemSize : 'no size comparison needed',
-                        exactMatchOriginal: baseItemName === baseOrderItemName,
-                        exactMatchEnglish: !isMeatButcher && baseItemName === orderEnglishName,
+                        exactMatchOriginal: baseItemName.toLowerCase() === baseOrderItemName.toLowerCase(),
+                        exactMatchEnglish: !isMeatButcher && baseItemName.toLowerCase() === orderEnglishName.toLowerCase(),
                         meatSuffixMatchEnglish: !isMeatButcher && orderItemCategory && orderItemCategory.toLowerCase().includes('meat') && 
-                                             baseItemName === `${orderEnglishName} meat`,
+                                             baseItemName.toLowerCase() === `${orderEnglishName} meat`.toLowerCase(),
                         meatSuffixMatchOriginal: !isMeatButcher && orderItemCategory && orderItemCategory.toLowerCase().includes('meat') && 
-                                               baseItemName === `${baseOrderItemName} meat`
+                                               baseItemName.toLowerCase() === `${baseOrderItemName} meat`.toLowerCase()
                     });
                     
                     // Special debugging for ayakoora meat
@@ -623,9 +717,9 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                             orderEnglishName,
                             orderItemSize,
                             menuItemSize: size,
-                            isExactMatch: baseItemName === baseOrderItemName || baseItemName === orderEnglishName,
-                            isPartialMatch: baseItemName.includes(baseOrderItemName) || baseOrderItemName.includes(baseItemName) ||
-                                         baseItemName.includes(orderEnglishName) || orderEnglishName.includes(baseItemName),
+                            isExactMatch: baseItemName.toLowerCase() === baseOrderItemName.toLowerCase() || baseItemName.toLowerCase() === orderEnglishName.toLowerCase(),
+                            isPartialMatch: baseItemName.toLowerCase().includes(baseOrderItemName.toLowerCase()) || baseOrderItemName.toLowerCase().includes(baseItemName.toLowerCase()) ||
+                                         baseItemName.toLowerCase().includes(orderEnglishName.toLowerCase()) || orderEnglishName.toLowerCase().includes(baseItemName.toLowerCase()),
                             fuzzyMatch: baseItemName.replace(/[^a-z]/g, '') === baseOrderItemName.replace(/[^a-z]/g, '') ||
                                       baseItemName.replace(/[^a-z]/g, '') === orderEnglishName.replace(/[^a-z]/g, ''),
                             isMatch,
@@ -681,8 +775,8 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                     console.log(`✅ Fuzzy match found: ${itemName} -> ${bestMatch} (₹${bestMatchPrice})`);
                     prices[itemName] = bestMatchPrice;
                 } else {
-                    console.log(`❌ No fuzzy match found for ${itemName}, using default 450`);
-                    prices[itemName] = 450; // Default price
+                    console.log(`❌ No fuzzy match found for ${itemName}, using default 0`);
+                    prices[itemName] = 0; // Default price
                 }
             }
         });
@@ -741,7 +835,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
         // Return default prices for all items
         const defaultPrices: {[itemName: string]: number} = {};
         itemNames.forEach(itemName => {
-            defaultPrices[itemName] = 450;
+            defaultPrices[itemName] = 0;
         });
         return defaultPrices;
     }
@@ -797,17 +891,59 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
             const cutTypes = parseArrayFromSheet(cutType || '');
             
             let preparingWeights: string[] = [];
+            const preparingWeightsMap: { [itemName: string]: string } = {}; // Map item name to weight
+            const rejectedItemNames = new Set<string>(); // Track rejected items
             
-            if (isMeat) {
-                // Meat butchers: Parse preparing weight column for custom weights
-                preparingWeights = parseArrayFromSheet(preparingWeight || '');
-                // If no custom weights found, fall back to quantities
-                if (preparingWeights.length === 0 || preparingWeights.every(w => !w || w.trim() === '')) {
+            // Parse preparing weight column
+            // New format: "item: weight" or "item: rejected" (colon format, no curly braces)
+            // Old format: "1.5kg, 500g" (comma-separated weights) - for backward compatibility
+            if (preparingWeight && preparingWeight.trim()) {
+                const weightStr = preparingWeight.trim();
+                
+                // Check if it's new colon format (contains ": " and item names)
+                if (weightStr.includes(': ') && weightStr.match(/[a-zA-Z]/)) {
+                    // Parse new format: "item: weight" or "item: rejected"
+                    const weightParts = weightStr.split(',').map((p: string) => p.trim()).filter((p: string) => p);
+                    
+                    weightParts.forEach((part: string) => {
+                        if (part.includes(': ')) {
+                            const colonIndex = part.indexOf(': ');
+                            const itemName = part.substring(0, colonIndex).trim();
+                            const value = part.substring(colonIndex + 2).trim();
+                            
+                            if (value.toLowerCase() === 'rejected') {
+                                // Item is rejected
+                                rejectedItemNames.add(itemName);
+                            } else {
+                                // Item is accepted with weight - store in map
+                                preparingWeightsMap[itemName] = value;
+                            }
+                        }
+                    });
+                    
+                    // Map weights to items by name (maintain order of itemNames array)
+                    itemNames.forEach((itemName, index) => {
+                        if (preparingWeightsMap[itemName]) {
+                            preparingWeights[index] = preparingWeightsMap[itemName];
+                        } else if (!rejectedItemNames.has(itemName)) {
+                            // Item not in map and not rejected - use original quantity as fallback
+                            preparingWeights[index] = quantities[index] || quantities[0] || '';
+                        }
+                    });
+                    
+                    // Fallback for meat butchers if no accepted items found
+                    if (preparingWeights.length === 0 && isMeat) {
                 preparingWeights = quantities;
                 }
             } else {
-                // Fish butchers: Use preparing weight column
-                preparingWeights = parseArrayFromSheet(preparingWeight || '');
+                    // Old format: Comma-separated weights (for backward compatibility)
+                    preparingWeights = parseArrayFromSheet(preparingWeight);
+                }
+            }
+            
+            // Fallback for meat butchers if still no weights found
+            if (isMeat && (preparingWeights.length === 0 || preparingWeights.every(w => !w || w.trim() === ''))) {
+                preparingWeights = quantities;
             }
 
             // Create order items
@@ -844,7 +980,7 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     }
                 }
 
-                return {
+                const orderItem: OrderItem = {
                     id: `${orderNo}-${index}`,
                     name: displayName,
                     quantity: parsedQty,
@@ -852,6 +988,13 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     cutType: cut || undefined,
                     size: itemSize || undefined
                 };
+                
+                // Mark item as rejected if found in rejectedItemNames
+                if (rejectedItemNames.has(itemName)) {
+                    (orderItem as any).rejected = 'Item rejected';
+                }
+
+                return orderItem;
             });
 
             // Determine order status based on sheet status or fallback to data analysis
@@ -861,11 +1004,47 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
             let pickedWeight: number | undefined;
             let finalWt: number | undefined;
             let revenue: number | undefined;
+            let itemRevenues: { [itemName: string]: number } | undefined;
 
             // Map sheet status to internal status
+            // Supports both old format (simple status) and new format (item-wise status)
             let rejectionReason: string | undefined;
             if (statusFromSheet && statusFromSheet.trim()) {
                 const sheetStatus = statusFromSheet.toLowerCase().trim();
+                
+                // Check if it's item-wise format (contains " - accepted" or " - rejected")
+                if (sheetStatus.includes(' - accepted') || sheetStatus.includes(' - rejected')) {
+                    // Parse item-wise status: "chicken leg - accepted, beef steak - rejected"
+                    const statusParts = sheetStatus.split(',').map((s: string) => s.trim()).filter((s: string) => s);
+                    const hasAccepted = statusParts.some((part: string) => part.includes(' - accepted'));
+                    const hasRejected = statusParts.some((part: string) => part.includes(' - rejected'));
+                    const allRejected = statusParts.length > 0 && statusParts.every((part: string) => part.includes(' - rejected'));
+                    
+                    // Determine overall status
+                    if (allRejected) {
+                        status = 'rejected';
+                        // Extract rejection reasons
+                        const rejectionParts = statusParts
+                            .filter((part: string) => part.includes(' - rejected'))
+                            .map((part: string) => {
+                                // Match: "item name - rejected - reason" or "item name - rejected"
+                                const match = part.match(/ - rejected(?: - (.+))?$/);
+                                return match && match[1] ? match[1].trim() : '';
+                            })
+                            .filter((r: string) => r);
+                        rejectionReason = rejectionParts.join('; ') || 'Order rejected';
+                    } else if (hasAccepted) {
+                        // At least one item accepted
+                        if (completionTime && completionTime.trim()) {
+                            status = 'completed';
+                        } else {
+                            status = 'preparing';
+                        }
+                    } else {
+                        status = 'new';
+                    }
+                } else {
+                    // Old format: Simple status string
                 switch (sheetStatus) {
                     case 'new':
                         status = 'new';
@@ -901,6 +1080,7 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                             status = 'completed';
                         } else {
                             status = 'new';
+                                }
                             }
                         }
                 }
@@ -939,18 +1119,51 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                 
                 // Read actual revenue from sheet instead of calculating with default rate
                 if (revenueFromSheet && revenueFromSheet.trim()) {
-                    // Parse revenue from sheet (could be comma-separated for multiple items)
-                    const revenueValues = parseArrayFromSheet(revenueFromSheet);
+                    // Parse revenue from sheet
+                    // New format: "item: revenue, item: revenue" (colon format, no curly braces)
+                    // Old format: "150.50, 200.00" (comma-separated numbers) - for backward compatibility
+                    const revenueStr = revenueFromSheet.trim();
+                    
+                    let revenueValues: number[] = [];
+                    const parsedItemRevenues: { [itemName: string]: number } = {};
+                    
+                    if (revenueStr.includes(': ')) {
+                        // New format: "item: revenue, item: revenue"
+                        const revenueParts = revenueStr.split(',').map((p: string) => p.trim()).filter((p: string) => p);
+                        revenueParts.forEach((part: string) => {
+                            // Extract item name and revenue from "item: revenue"
+                            const colonIndex = part.indexOf(': ');
+                            if (colonIndex > 0) {
+                                const itemName = part.substring(0, colonIndex).trim();
+                                const revenueValue = parseFloat(part.substring(colonIndex + 2).trim()) || 0;
+                                if (revenueValue > 0) {
+                                    parsedItemRevenues[itemName] = revenueValue;
+                                    revenueValues.push(revenueValue);
+                                }
+                            }
+                        });
+                    } else {
+                        // Old format: Comma-separated numbers
+                        revenueValues = parseArrayFromSheet(revenueFromSheet)
+                            .map((rev: string) => parseFloat(rev) || 0)
+                            .filter((rev: number) => rev > 0);
+                    }
+                    
                     if (revenueValues.length > 0) {
                         // Sum up all revenue values if there are multiple items
-                        revenue = revenueValues.reduce((sum, rev) => sum + (parseFloat(rev) || 0), 0);
+                        revenue = revenueValues.reduce((sum, rev) => sum + rev, 0);
                         console.log(`Order ${orderNo}: Reading revenue from sheet: "${revenueFromSheet}" -> parsed: [${revenueValues.join(', ')}] -> total: ${revenue}`);
+                        
+                        // Store itemRevenues if parsed
+                        if (Object.keys(parsedItemRevenues).length > 0) {
+                            itemRevenues = parsedItemRevenues;
+                        }
                     }
                 } else if (preparingWeights.length > 0) {
                     // Fallback: Calculate revenue using preparing weight with default rate
                     const totalPreparingWeight = preparingWeights.reduce((sum, w) => sum + (parseFloat(w) || 0), 0);
-                    revenue = totalPreparingWeight * 450; // Default rate fallback
-                    console.log(`Order ${orderNo}: No revenue in sheet, using fallback calculation: ${totalPreparingWeight} * 450 = ${revenue}`);
+                    revenue = totalPreparingWeight * 0; // Default rate fallback
+                    console.log(`Order ${orderNo}: No revenue in sheet, using fallback calculation: ${totalPreparingWeight} * 0 = ${revenue}`);
                 }
             } else if (status === 'rejected') {
                 // For rejected orders, read revenue from sheet if available
@@ -965,8 +1178,8 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                 } else {
                     // For rejected orders without revenue in sheet, calculate potential revenue based on quantities
                     const totalQuantity = quantities.reduce((sum, q) => sum + (parseFloat(q) || 0), 0);
-                    revenue = totalQuantity * 450; // Default rate for potential revenue
-                    console.log(`Order ${orderNo}: No revenue in sheet for rejected order, calculating potential revenue: ${totalQuantity} * 450 = ${revenue}`);
+                    revenue = totalQuantity * 0; // Default rate for potential revenue
+                    console.log(`Order ${orderNo}: No revenue in sheet for rejected order, calculating potential revenue: ${totalQuantity} * 0 = ${revenue}`);
                 }
             }
 
@@ -1051,6 +1264,7 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                 console.log(`Fish butcher - itemWeights:`, itemWeights);
                 console.log(`Fish butcher - preparingWeights from sheet:`, preparingWeights);
                 console.log(`Fish butcher - itemsWithCategory:`, itemsWithCategory.map(item => item.name));
+                console.log(`Fish butcher - itemWeights mapping:`, itemWeights ? Object.entries(itemWeights) : 'none');
             }
 
             const order: Order = {
@@ -1065,7 +1279,9 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                 revenue,
                 rejectionReason,
                 // Add custom weights based on butcher type
-                ...(isMeat ? { itemQuantities } : { itemWeights })
+                ...(isMeat ? { itemQuantities } : { itemWeights }),
+                // Add itemRevenues if parsed from sheet
+                ...(itemRevenues ? { itemRevenues } : {})
             };
 
             // Add individual weights/quantities based on butcher type
@@ -1120,9 +1336,12 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
 
-        // Extract order number from order ID (ORD-2024-01-15-123 -> 123)
+        // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
-        const orderNo = orderIdParts[orderIdParts.length - 1]; // Get the last part (order number)
+        const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
+        
+        // Order Date: Always use today's date in IST
+        const orderDate = getISTDate();
         
         // Format data for sheet
         const items = formatArrayForSheet(order.items.map(item => item.name));
@@ -1130,18 +1349,13 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
         const sizes = formatArrayForSheet(order.items.map(item => item.size || ''));
         const cutTypes = formatArrayForSheet(order.items.map(item => item.cutType || ''));
         
-        // Get order date in DD/MM/YYYY format (use order's date or current date)
-        const orderDate = order.orderTime ? 
-            new Date(order.orderTime).toLocaleDateString('en-GB') : 
-            new Date().toLocaleDateString('en-GB');
-        
-        // Determine butcher type for preparing weight initialization
+        // Determine butcher type for column structure
         const isMeat = isMeatButcher(butcherId);
         
-        // For meat butchers, initialize preparing weight with quantities
-        // For fish butchers, leave preparing weight empty initially
-        const initialPreparingWeight = isMeat ? quantities : '';
-        
+        // Different column structures based on butcher type
+        // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
+        // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns)
+        const range = isMeat ? `${tabName}!A2:F` : `${tabName}!A2:G`;
         const rowData = [
             orderDate, // Order Date (use actual order date)
             orderNo,
@@ -1149,7 +1363,7 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
             quantities,
             sizes, // Size column (new)
             cutTypes,
-            initialPreparingWeight, // preparing weight (quantities for meat, empty for fish)
+            '', // preparing weight (empty initially)
             '', // completion time (empty initially)
             '', // start time (empty initially)
             'New', // status (starts as 'New')
@@ -1178,19 +1392,15 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
 };
 
 /**
- * Update order status in the Butcher POS sheet
+ * Save order to sheet after accepting (with item-wise status)
+ * Used when order response is sent to Central API
+ * Returns the calculated revenue for cache update
  */
-export const updateOrderInSheet = async (order: Order, butcherId: string) => {
+export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: string): Promise<{
+  totalRevenue: number;
+  itemRevenues: { [itemName: string]: number };
+}> => {
     try {
-        console.log('\n=== UPDATE ORDER IN SHEET START ===');
-        console.log('Order ID:', order.id);
-        console.log('Butcher ID:', butcherId);
-        console.log('Order Status:', order.status);
-        console.log('Rejection Reason:', order.rejectionReason);
-        console.log('BUTCHER_POS_SHEET_ID:', BUTCHER_POS_SHEET_ID ? 'Set' : 'Not Set');
-        
-        // Order updated - polling will pick up changes
-        
         if (!BUTCHER_POS_SHEET_ID) {
             throw new Error("BUTCHER_POS_SHEET_ID or GOOGLE_SPREADSHEET_ID not configured");
         }
@@ -1202,17 +1412,122 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
 
-        // Extract order number from order ID (ORD-2024-01-15-123 -> 123)
+        // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
-        const orderNo = orderIdParts[orderIdParts.length - 1]; // Get the last part (order number)
+        const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
         
-        // Get the order date from the order object or use current date
-        const orderDate = order.orderTime ? 
-            new Date(order.orderTime).toLocaleDateString('en-GB') : 
-            new Date().toLocaleDateString('en-GB');
+        // Order Date: Always use today's date in IST
+        const orderDate = getISTDate();
+
+        // Format item-wise data (comma-separated)
+        const itemNames = order.items.map(item => item.name).join(', ');
+        const quantities = order.items.map(item => `${item.quantity}${item.unit}`).join(', ');
+        const sizes = order.items.map(item => item.size || '').join(', ');
+        const cutTypes = order.items.map(item => item.cutType || '').join(', ');
+
+        // Preparing weights: Format as {item: weight} or {item: rejected}
+        const preparingWeights = order.items.map(item => {
+            const preparingWeight = (item as any).preparingWeight;
+            const rejected = (item as any).rejected;
+            
+            if (rejected) {
+                return `${item.name}: rejected`;
+            } else if (preparingWeight) {
+                return `${item.name}: ${preparingWeight}`;
+            }
+            return '';
+        }).filter(w => w).join(', ');
+
+        // Calculate revenue using preparing weights (or fall back to original weights)
+        const { totalRevenue, itemRevenues } = await calculateRevenueFromPreparingWeights(order, butcherId);
+
+        // Status: Only "completed" or "rejected"
+        const allItemsRejected = order.items.every(item => (item as any).rejected);
+        const sheetStatus = allItemsRejected ? 'rejected' : 'completed';
+
+        // Start Time: IST format, human-readable (when order was accepted)
+        const startTime = order.preparationStartTime ? getISTDateTime(order.preparationStartTime) : getISTDateTime(new Date());
+
+        // Revenue: Format as {item: revenue} for multiple items, comma-separated
+        let revenueForSheet = '';
+        if (itemRevenues && Object.keys(itemRevenues).length > 0) {
+            const revenueParts = Object.entries(itemRevenues)
+                .filter(([itemName, revenue]) => revenue > 0)
+                .map(([itemName, revenue]) => `${itemName}: ${revenue.toFixed(2)}`);
+            revenueForSheet = revenueParts.join(', ');
+        } else if (totalRevenue > 0) {
+            revenueForSheet = totalRevenue.toFixed(2);
+        }
+
+        const rowData = [
+            orderDate,
+            orderNo,
+            itemNames,
+            quantities,
+            sizes,
+            cutTypes,
+            preparingWeights, // Format: {item: weight} or {item: rejected}
+            '', // completion time (empty initially, will be set when order is completed)
+            startTime, // start time in IST format
+            sheetStatus, // Only "completed" or "rejected"
+            revenueForSheet // Format: {item: revenue}, {item: revenue}
+        ];
+
+        // Append to the specific tab
+        await measureApiCall(
+            `saveOrderAfterAccept:${butcherId}`,
+            'POST',
+            () => sheets.spreadsheets.values.append({
+                spreadsheetId: BUTCHER_POS_SHEET_ID,
+                range: `${tabName}!A:K`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [rowData]
+                }
+            }),
+            { sheetId: BUTCHER_POS_SHEET_ID, sheetName: 'Butcher POS Sheet' }
+        );
+
+        console.log(`[Order] Saved to Butcher POS sheet: Order ${orderNo}, Revenue: ₹${totalRevenue.toFixed(2)}`);
+
+        return { totalRevenue, itemRevenues };
+
+    } catch (error: any) {
+        console.error('Error saving order to sheet after accept:', error);
+        throw new Error(`Failed to save order: ${error.message}`);
+    }
+};
+
+/**
+ * Update order status in the Butcher POS sheet
+ */
+export const updateOrderInSheet = async (order: Order, butcherId: string) => {
+    try {
+        if (!BUTCHER_POS_SHEET_ID) {
+            throw new Error("BUTCHER_POS_SHEET_ID or GOOGLE_SPREADSHEET_ID not configured");
+        }
+
+        const sheets = await getButcherSheetsClient(butcherId);
+        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
         
-        // Find the row with this order number AND date combination
-        const range = `${tabName}!A:K`;
+        if (!tabName) {
+            throw new Error(`No tab found for butcher: ${butcherId}`);
+        }
+
+        // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
+        const orderIdParts = order.id.replace('ORD-', '').split('-');
+        const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
+        
+        // Order Date: Always use today's date in IST
+        const orderDate = getISTDate();
+        
+        // Determine butcher type for column structure
+        const isMeat = isMeatButcher(butcherId);
+        
+        // Different column structures based on butcher type
+        // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
+        // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns)
+        const range = isMeat ? `${tabName}!A2:F` : `${tabName}!A2:G`;
         const response = await measureApiCall(
             `findOrder:${butcherId}`,
             'GET',
@@ -1226,93 +1541,180 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         const rows = response.data.values || [];
         let rowIndex = -1;
         
+        const orderNoStr = String(orderNo);
         for (let i = 1; i < rows.length; i++) { // Start from 1 to skip header
             const rowDate = rows[i][0]; // Order Date is in column A (index 0)
             const rowOrderNo = rows[i][1]; // Order No is in column B (index 1)
             
-            console.log(`Searching row ${i}: date="${rowDate}", orderNo="${rowOrderNo}" vs target: date="${orderDate}", orderNo="${orderNo}"`);
+            // Convert both to strings for comparison (sheet values are strings)
+            const rowOrderNoStr = String(rowOrderNo || '').trim();
             
             // Match both date and order number to ensure uniqueness
-            if (rowDate === orderDate && rowOrderNo === orderNo) {
+            if (rowDate === orderDate && rowOrderNoStr === orderNoStr) {
                 rowIndex = i + 1; // Sheet rows are 1-indexed
-                console.log(`✅ Found matching order at row ${rowIndex}`);
                 break;
             }
         }
 
         if (rowIndex === -1) {
-            throw new Error(`Order ${orderNo} for date ${orderDate} not found in sheet`);
+            // Try alternative date formats based on order.orderTime
+            const orderTimeDate = new Date(order.orderTime);
+            const alternativeDates = [
+                orderTimeDate.toLocaleDateString('en-US'), // US format: MM/DD/YYYY
+                orderTimeDate.toLocaleDateString('en-CA'), // Canadian format: YYYY-MM-DD
+                orderTimeDate.toISOString().split('T')[0], // ISO format: YYYY-MM-DD
+                orderDate, // Already tried format (en-GB)
+            ];
+            
+            for (let altDate of alternativeDates) {
+                const orderNoStr = String(orderNo);
+                for (let i = 1; i < rows.length; i++) {
+                    const rowDate = rows[i][0];
+                    const rowOrderNo = rows[i][1];
+                    const rowOrderNoStr = String(rowOrderNo || '').trim();
+                    
+                    if (rowDate === altDate && rowOrderNoStr === orderNoStr) {
+                        rowIndex = i + 1;
+                        break;
+                    }
+                }
+                if (rowIndex !== -1) break;
+            }
+        }
+        
+        if (rowIndex === -1) {
+            // Don't create duplicate orders! 
+            // If order is being completed, it should already exist in the sheet from when it was accepted.
+            // Only create if it's a truly new order (status is 'new' or 'preparing' without data)
+            // For completed orders, if they're not found, log a warning but don't create duplicates
+            if (order.status === 'completed' || order.status === 'prepared') {
+                return; // Exit early - don't create duplicate
+            }
+            
+            // Only create new orders if they're truly new (status is 'new' or 'preparing' without accepted data)
+            try {
+                // Check if order has been accepted (has revenue, weights, or item data)
+                // If it has data, use saveOrderToSheetAfterAccept, otherwise use saveOrderToSheet
+                const hasOrderData = (order.revenue && order.revenue > 0) || 
+                                   (order.itemWeights && Object.keys(order.itemWeights).length > 0) ||
+                                   (order.itemQuantities && Object.keys(order.itemQuantities).length > 0) ||
+                                   order.items.some(item => (item as any).preparingWeight || (item as any).rejected);
+                
+                if (hasOrderData && (order.status === 'preparing' || order.status === 'new')) {
+                    // Order has been accepted/prepared - use saveOrderToSheetAfterAccept
+                    await saveOrderToSheetAfterAccept(order, butcherId);
+                } else if (order.status === 'new' || order.status === 'preparing') {
+                    // New order without data - use saveOrderToSheet
+                    await saveOrderToSheet(order, butcherId);
+                } else {
+                    // For other statuses, don't create - just return
+                    return; // Exit early - don't create
+                }
+                
+                // Now try to find it again
+                const newResponse = await measureApiCall(
+                    `findOrderAfterSave:${butcherId}`,
+                    'GET',
+                    () => sheets.spreadsheets.values.get({
+                        spreadsheetId: BUTCHER_POS_SHEET_ID,
+                        range,
+                    }),
+                    { sheetId: BUTCHER_POS_SHEET_ID, sheetName: 'Butcher POS Sheet' }
+                );
+                
+                const newRows = newResponse.data.values || [];
+                const orderNoStr = String(orderNo);
+                for (let i = 1; i < newRows.length; i++) {
+                    const rowDate = newRows[i][0];
+                    const rowOrderNo = newRows[i][1];
+                    const rowOrderNoStr = String(rowOrderNo || '').trim();
+                    
+                    if (rowDate === orderDate && rowOrderNoStr === orderNoStr) {
+                        rowIndex = i + 1;
+                        break;
+                    }
+                }
+                
+                if (rowIndex === -1) {
+                    return; // Exit early - don't throw error, just skip update
+                }
+            } catch (saveError) {
+                console.error(`[Order] Failed to save order before updating:`, saveError);
+                return;
+            }
         }
 
-        // Determine butcher type for column structure
-        const isMeat = isMeatButcher(butcherId);
-        
         // Prepare update data based on butcher type
+        // Format preparing weight: {item: weight} or {item: rejected}
         let preparingWeight = '';
-        console.log('\n=== UPDATE ORDER IN SHEET DEBUG ===');
-        console.log('Order ID:', order.id);
-        console.log('Butcher ID:', butcherId);
-        console.log('Is Meat Butcher:', isMeat);
-        console.log('Order itemQuantities:', order.itemQuantities);
-        console.log('Order itemWeights:', order.itemWeights);
-        console.log('Order pickedWeight:', order.pickedWeight);
-        console.log('Order itemQuantities:', order.itemQuantities);
-        console.log('Order itemWeights:', order.itemWeights);
         
+        // Build preparing weight string in format: {item: weight} or {item: rejected}
+        const preparingWeightParts: string[] = [];
+        order.items.forEach(item => {
+            const rejected = (item as any).rejected;
+            if (rejected) {
+                // Item rejected: {item: rejected}
+                preparingWeightParts.push(`{${item.name}: rejected}`);
+            } else {
+                // Item accepted: get preparing weight
+                let weight = '';
         if (isMeat) {
-            // Meat butchers: Use itemQuantities (user-entered preparing weights) for the preparing weight column
-            preparingWeight = order.itemQuantities ? 
-                Object.values(order.itemQuantities).join(',') : 
-                (order.pickedWeight ? order.pickedWeight.toString() : '');
-            console.log('Meat butcher - preparingWeight from itemQuantities:', preparingWeight);
+                    weight = order.itemQuantities?.[item.name] || '';
         } else {
-            // Fish butchers: Use itemWeights (user-entered preparing weights) for the preparing weight column
-            preparingWeight = order.itemWeights ? 
-                Object.values(order.itemWeights).join(',') : 
-                (order.pickedWeight ? order.pickedWeight.toString() : '');
-            console.log('Fish butcher - preparingWeight from itemWeights:', preparingWeight);
-        console.log('Fish butcher - itemWeights keys:', order.itemWeights ? Object.keys(order.itemWeights) : 'none');
-        console.log('Fish butcher - itemWeights values:', order.itemWeights ? Object.values(order.itemWeights) : 'none');
-        console.log('Fish butcher - order items:', order.items.map(item => item.name));
-        console.log('Fish butcher - order itemWeights mapping:', order.itemWeights ? Object.entries(order.itemWeights) : 'none');
-        }
+                    weight = order.itemWeights?.[item.name] || '';
+                }
+                if (weight) {
+                    // Remove unit if present (e.g., "1.5kg" -> "1.5")
+                    const weightValue = weight.replace(/kg|nos|g/gi, '').trim();
+                    preparingWeightParts.push(`{${item.name}: ${weightValue}}`);
+                }
+            }
+        });
+        preparingWeight = preparingWeightParts.join(', ');
         console.log('Final preparingWeight to save:', preparingWeight);
         console.log('=====================================\n');
             
-        const completionTime = order.completionTime && order.completionTime > 0 ? `${order.completionTime} min` : '5 min'; // Default to 5 min if no completion time
-        const startTime = order.preparationStartTime ? 
-            (order.preparationStartTime instanceof Date ? 
-                order.preparationStartTime.toISOString() : 
-                new Date(order.preparationStartTime).toISOString()) : '';
+        // Completion Time: Time taken if within 20min, or actual IST time if exceeded
+        const completionTime = getCompletionTime(order.preparationStartTime, order.preparationEndTime);
         
-        // Map internal status to sheet status
+        // Start Time: IST format, human-readable (when order was accepted)
+        const startTime = order.preparationStartTime ? getISTDateTime(order.preparationStartTime) : '';
+        
+        // Status: Only "completed" or "rejected"
+        // - "completed" if any items completed (partial or full)
+        // - "rejected" only if entire order is rejected
         let sheetStatus = '';
-        switch (order.status) {
-            case 'new':
-                sheetStatus = 'New';
-                break;
-            case 'preparing':
-                if (isMeat) {
-                    sheetStatus = 'Preparing';
+        const allItemsRejected = order.items.every(item => (item as any).rejected);
+        const hasAcceptedItems = order.items.some(item => !(item as any).rejected);
+        
+        if (order.status === 'rejected' || allItemsRejected) {
+            sheetStatus = 'rejected';
+        } else if (order.status === 'completed' || order.status === 'prepared' || hasAcceptedItems) {
+            sheetStatus = 'completed';
                 } else {
-                    sheetStatus = preparingWeight ? 'Preparing' : 'Accepted';
-                }
-                break;
-            case 'completed':
-                sheetStatus = 'Ready to Pick Up';
-                break;
-            case 'rejected':
-                // Store rejection reason in status column with a prefix to identify it
-                sheetStatus = order.rejectionReason ? `REJECTED: ${order.rejectionReason}` : 'Declined';
-                break;
-            default:
-                sheetStatus = 'New';
+            // Default to completed if status is unclear
+            sheetStatus = 'completed';
         }
         
-        // Format revenue for sheet (comma-separated for multiple items)
-        const revenueForSheet = order.itemRevenues ? 
-            Object.values(order.itemRevenues).map(rev => rev.toFixed(2)).join(',') : 
-            (order.revenue ? order.revenue.toFixed(2) : '');
+        // Revenue: Format as {item: revenue} for multiple items, comma-separated
+        let revenueForSheet = '';
+        if (order.itemRevenues && Object.keys(order.itemRevenues).length > 0) {
+            // Format: {item: revenue}, {item: revenue}
+            const revenueParts = Object.entries(order.itemRevenues)
+                .filter(([itemName, revenue]) => revenue > 0) // Only include items with revenue
+                .map(([itemName, revenue]) => `{${itemName}: ${revenue.toFixed(2)}}`);
+            revenueForSheet = revenueParts.join(', ');
+            console.log('Using pre-calculated item revenues:', order.itemRevenues);
+        } else if (order.revenue && order.revenue > 0) {
+            // Fallback: If only total revenue available, distribute equally (or use total)
+            // For now, just use total as single value
+            revenueForSheet = order.revenue.toFixed(2);
+            console.log('Using total revenue:', order.revenue);
+        } else {
+            // No revenue calculated yet
+            revenueForSheet = '';
+            console.log('No revenue calculated yet for order status:', order.status);
+        }
 
         console.log('\n=== BUTCHER POS SHEET UPDATE DEBUG ===');
         console.log('Order details:', {
@@ -1334,7 +1736,10 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             hasRevenue: !!order.revenue,
             hasItemRevenues: !!order.itemRevenues,
             revenueType: typeof order.revenue,
-            itemRevenuesType: typeof order.itemRevenues
+            itemRevenuesType: typeof order.itemRevenues,
+            orderStatus: order.status,
+            isCompleted: order.status === 'completed',
+            isPreparing: order.status === 'preparing'
         });
         console.log('Revenue calculation details:', {
             orderRevenue: order.revenue,
@@ -1390,6 +1795,16 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
 
     } catch (error: any) {
         console.error('Error updating order in sheet:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Order data that caused error:', {
+            id: order.id,
+            status: order.status,
+            butcherId: butcherId,
+            revenue: order.revenue,
+            itemRevenues: order.itemRevenues,
+            itemWeights: order.itemWeights,
+            itemQuantities: order.itemQuantities
+        });
         
         // Provide more specific error messages
         if (error.message?.includes('not configured')) {
@@ -1423,8 +1838,8 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
         }
 
         // Determine butcher type
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton'].includes(butcherId);
-        const isFishButcher = ['kak', 'ka_sons', 'alif'].includes(butcherId);
+        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
+        const isFishButcher = ['kak', 'ka_sons', 'alif','test_fish'].includes(butcherId);
         
         // Clear existing data
         const clearRange = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
@@ -1530,6 +1945,28 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             });
         }
 
+        // Notify Central API about menu update (non-blocking)
+        try {
+            const { centralAPIClient } = await import('./centralAPIClient');
+            const { getButcherNameFromId } = await import('./butcherMapping');
+            const { queueMenuUpdate } = await import('./orderQueue');
+            
+            const butcherName = getButcherNameFromId(butcherId) || butcherId;
+            
+            // Attempt to notify Central API
+            try {
+                await centralAPIClient.notifyMenuUpdate(butcherId, butcherName);
+                console.log(`[Menu] Updated and notified Central API: ${butcherName}`);
+            } catch (error: any) {
+                // If notification fails, queue it for retry
+                console.warn(`⚠️ Failed to notify Central API about menu update, queuing for retry:`, error.message);
+                queueMenuUpdate(butcherId, butcherName);
+            }
+        } catch (error: any) {
+            // Log but don't fail menu save if notification setup fails
+            console.error('Error setting up menu update notification:', error);
+        }
+
     } catch (error: any) {
         console.error('Error saving menu to sheet:', error);
         throw new Error(`Failed to save menu: ${error.message}`);
@@ -1553,7 +1990,7 @@ export const getMenuFromSheet = async (butcherId: string): Promise<MenuCategory[
         }
 
         // Determine butcher type
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton'].includes(butcherId);
+        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
         
         // Read data from sheet
         const range = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
@@ -1662,13 +2099,6 @@ const extractEnglishName = (fullName: string): string => {
 };
 
 /**
- * Normalize item name for matching (handles case differences and spaces)
- */
-const normalizeItemName = (name: string): string => {
-    return name.toLowerCase().replace(/\s+/g, ' ').trim();
-};
-
-/**
  * Merge menu data from sheet with the full menu structure
  */
 export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCategory[]): Promise<MenuCategory[]> => {
@@ -1710,14 +2140,11 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
             ...category,
             items: category.items.map(item => {
                 // Extract English name for fish items
-                const isFishButcher = ['kak', 'ka_sons', 'alif'].includes(butcherId);
                 let searchName = item.name;
                 
-                if (isFishButcher && item.name.includes(' - ')) {
+                if (item.name.includes(' - ') && item.name.split(' - ').length >= 3) {
                     const nameParts = item.name.split(' - ');
-                    if (nameParts.length >= 3) {
-                        searchName = nameParts[1].trim(); // Extract English name
-                    }
+                    searchName = nameParts[1].trim(); // Extract English name
                 }
                 
                 // Try to find sheet data
@@ -1790,7 +2217,7 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton'].includes(butcherId);
+        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
         
         // Different column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
@@ -1908,9 +2335,9 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
 
             // If no price found, use default
             if (purchasePrice === 0) {
-                console.warn(`⚠️ No purchase price found for ${item.name} (${exactItemName}) in ${butcherId} menu. Using default price 450.`);
+                console.warn(`⚠️ No purchase price found for ${item.name} (${exactItemName}) in ${butcherId} menu. Using default price 0.`);
                 console.log(`Available menu prices for ${butcherId}:`, Object.keys(menuPrices));
-                purchasePrice = 450; // Default price per kg
+                purchasePrice = 0; // Default price per kg
             }
 
             // Get commission rate for this item's category (load from Google Sheets)
@@ -1940,7 +2367,7 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
         const defaultEarnings: { [itemName: string]: { purchasePrice: number; butcherEarnings: number; totalEarnings: number } } = {};
         
         for (const item of orderItems) {
-            const defaultPrice = 450;
+            const defaultPrice = 0;
             const itemCategory = item.category || 'default';
             const commissionRate = getCommissionRate(butcherId, itemCategory);
             const butcherPrice = defaultPrice - (defaultPrice * commissionRate);
@@ -1955,9 +2382,199 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
     }
 };
 
-// Legacy function for compatibility - redirects to new function
-export const savePreparedOrderToSheet = async (order: Order, butcherId: string) => {
-    return updateOrderInSheet(order, butcherId);
+// REMOVED: savePreparedOrderToSheet - unnecessary wrapper
+// Use updateOrderInSheet directly for status updates
+
+/**
+ * Calculate revenue from order items using preparing weights
+ * Uses preparing weights if available, otherwise falls back to original order weights
+ */
+const calculateRevenueFromPreparingWeights = async (
+  order: Order,
+  butcherId: string
+): Promise<{ totalRevenue: number; itemRevenues: { [itemName: string]: number } }> => {
+  let totalRevenue = 0;
+  const itemRevenues: { [itemName: string]: number } = {};
+  
+  // Helper to parse weight string (e.g., "1.5kg" -> 1.5, "2nos" -> 2, "500g" -> 0.5)
+  const parseWeightString = (weightStr: string, unit: string): number => {
+    if (!weightStr) return 0;
+    
+    // Remove unit if present and extract numeric part
+    const numericPart = weightStr.replace(/[^0-9.]/g, '');
+    const weight = parseFloat(numericPart) || 0;
+    
+    // Convert grams to kg if needed
+    if (weightStr.toLowerCase().includes('g') && !weightStr.toLowerCase().includes('kg')) {
+      return weight / 1000; // Convert grams to kg
+    }
+    
+    return weight;
+  };
+  
+  for (const item of order.items) {
+    const itemName = item.name;
+    const itemSize = item.size || 'default'; // Get size from order item, default to 'default' if not present
+    const itemKey = `${itemName}_${itemSize}`; // Use itemName_size as key for revenue tracking
+    const rejected = (item as any).rejected;
+    
+    // Skip rejected items (no revenue)
+    if (rejected) {
+      itemRevenues[itemKey] = 0;
+      continue;
+    }
+    
+    // Get preparing weight from item, or fall back to original quantity
+    const preparingWeightStr = (item as any).preparingWeight;
+    let weight = 0;
+    
+    if (preparingWeightStr) {
+      // Use preparing weight entered by butcher
+      weight = parseWeightString(preparingWeightStr, item.unit);
+    } else {
+      // Fall back to original order quantity
+      weight = item.quantity;
+    }
+    
+    if (weight <= 0) {
+      itemRevenues[itemKey] = 0;
+      continue;
+    }
+    
+    try {
+      // Get purchase price and commission rate (pass size parameter)
+      const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
+      const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+      
+      // Calculate item revenue: (Purchase Price × Weight) - Commission% of (Purchase Price × Weight)
+      const itemRevenue = (purchasePrice * weight) - (commissionRate * purchasePrice * weight);
+      
+      itemRevenues[itemKey] = itemRevenue;
+      totalRevenue += itemRevenue;
+    } catch (error) {
+      console.error(`[Order] Error calculating revenue for ${itemName} (${itemSize}):`, error);
+      itemRevenues[itemKey] = 0;
+    }
+  }
+  
+  return { totalRevenue, itemRevenues };
+};
+
+/**
+ * Centralized revenue calculation for completed orders
+ * This ensures revenue is calculated once and stored consistently
+ */
+export const calculateOrderRevenue = async (order: Order, butcherId: string): Promise<{
+  totalRevenue: number;
+  itemRevenues: { [itemName: string]: number };
+}> => {
+  
+  let totalRevenue = 0;
+  const itemRevenues: { [itemName: string]: number } = {};
+  
+  // Helper functions for butcher type detection
+  const isFishButcher = (butcherId: string) => ['kak', 'ka_sons', 'alif','test_fish'].includes(butcherId);
+  const fishButcher = isFishButcher(butcherId);
+  
+  for (const item of order.items) {
+    const itemName = item.name;
+    const itemSize = item.size || 'default'; // Get size from order item, default to 'default' if not present
+    const itemKey = `${itemName}_${itemSize}`; // Use itemName_size as key for revenue tracking
+    const rejected = (item as any).rejected;
+    
+    // ✅ FIX: Skip rejected items (no revenue for rejected items)
+    if (rejected) {
+      console.log(`Skipping ${itemName} (${itemSize}) - rejected: ${rejected}`);
+      itemRevenues[itemKey] = 0;
+      continue;
+    }
+    
+    // Get preparing weight (fish butchers use itemWeights, meat butchers use itemQuantities)
+    const preparingWeight = parseFloat(
+      String(fishButcher
+        ? order.itemWeights?.[itemName] ?? item.quantity
+        : order.itemQuantities?.[itemName] ?? item.quantity)
+    );
+    
+    console.log(`Calculating revenue for ${itemName} (${itemSize}): ${preparingWeight}kg (${fishButcher ? 'fish' : 'meat'} butcher)`);
+    
+    // Get purchase price and commission rate (pass size parameter)
+    const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
+    const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+    
+    // Calculate item revenue: (Purchase Price × Weight) - Commission% of (Purchase Price × Weight)
+    const itemRevenue = (purchasePrice * preparingWeight) - (commissionRate * purchasePrice * preparingWeight);
+    
+    itemRevenues[itemKey] = itemRevenue;
+    totalRevenue += itemRevenue;
+  }
+  
+  return { totalRevenue, itemRevenues };
+};
+
+/**
+ * Prepare order: Calculate revenue and update butcher sheet
+ * This happens when user enters preparing weights
+ */
+export const prepareOrder = async (order: Order, butcherId: string): Promise<Order> => {
+  try {
+    // Step 1: Calculate revenue centrally
+    const { totalRevenue, itemRevenues } = await calculateOrderRevenue(order, butcherId);
+    
+    // Step 2: Update order with calculated revenue and preparing status
+    const updatedOrder = {
+      ...order,
+      revenue: totalRevenue,
+      itemRevenues: itemRevenues,
+      status: 'preparing' as const,
+      preparationStartTime: new Date()
+    };
+    
+    // Step 3: Update butcher sheet with preparing order (including revenue)
+    await updateOrderInSheet(updatedOrder, butcherId);
+    
+    return updatedOrder;
+    
+  } catch (error) {
+    console.error(`[Order] Failed to prepare order ${order.id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Complete order: Save to sales sheet
+ * This happens when order is marked as completed
+ */
+export const completeOrder = async (order: Order, butcherId: string): Promise<void> => {
+  // Validate order data
+  if (!order.items || order.items.length === 0) {
+    throw new Error(`Order ${order.id} has no items. Cannot complete order without items.`);
+  }
+  
+  try {
+    // Step 1: Update order status to completed
+    // Ensure preparationStartTime is set (use current time if not set)
+    const now = new Date();
+    const completedOrder = {
+      ...order,
+      status: 'completed' as const,
+      completionTime: Date.now(), // Use timestamp instead of string
+      preparationStartTime: order.preparationStartTime || now, // Set start time if not already set
+      preparationEndTime: now // Set end time for completion time calculation
+    };
+    
+    // Step 2: Update butcher sheet with completed status
+    await updateOrderInSheet(completedOrder, butcherId);
+    
+    // Step 3: Save to sales sheet with all order details
+    const { saveSalesDataToSheet } = await import('./salesSheets');
+    await saveSalesDataToSheet(order.id, butcherId, completedOrder);
+    console.log(`[Order] Saved to Sales VCS sheet: Order ${order.id}`);
+    
+  } catch (error) {
+    console.error(`[Order] Failed to complete order ${order.id}:`, error);
+    throw error;
+  }
 };
 
 /**
@@ -2203,4 +2820,134 @@ export const getRatesFromSheet = async (): Promise<ButcherRates[]> => {
         // Return defaults on error
         return getDefaultButcherRates();
     }
+};
+
+export const getPurchasePriceFromMenu = async (
+  butcherId: string,
+  itemName: string,
+  size: string = 'default'
+): Promise<number> => {
+  // Butcher name mapping
+  const butcherNames: Record<string, string> = {
+    'usaj': 'Usaj_Meat_Hub',
+    'usaj_mutton': 'Usaj_Mutton_Shop',
+    'pkd': 'PKD_Stall',
+    'kak': 'KAK',
+    'ka_sons': 'KA_Sons',
+    'alif': 'Alif',
+    'test_fish': 'Test_Fish_Butcher',
+    'test_meat': 'Test_Meat_Butcher'
+  };
+  const tabName = butcherNames[butcherId] || butcherId;
+  
+  try {
+    const sheets = await getSheetSheetsClient('menu');
+    const spreadsheetId = process.env.MENU_POS_SHEET_ID;
+    if (!spreadsheetId) {
+      console.error('Menu POS Spreadsheet ID not found');
+      return 0;
+    }
+    
+    // Determine if this is a meat butcher
+    // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns, no Size column)
+    // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns, has Size column)
+    const isMeat = ['usaj', 'usaj_mutton', 'pkd', 'test_meat'].includes(butcherId);
+    
+    // For meat butchers: Purchase Price is in column C (index 2)
+    // For fish butchers: Size is in column C (index 2), Purchase Price is in column D (index 3)
+    const sizeColumn = isMeat ? -1 : 2; // Column C (index 2) for fish, not needed for meat
+    const priceColumn = isMeat ? 2 : 3; // Column C for meat, Column D for fish
+    
+    // Read appropriate range based on butcher type
+    // Meat: A:C (Item Name, Category, Purchase Price)
+    // Fish: A:D (Item Name, Category, Size, Purchase Price)
+    const range = `${tabName}!A:${isMeat ? 'C' : 'D'}`;
+    
+    // Fetch data
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range
+    });
+    
+    const rows = response.data.values || [];
+    const normalizedItemName = normalizeItemName(itemName);
+    const normalizedSize = size.toLowerCase();
+    
+    // ✅ FIX: For meat butchers, ALWAYS match by item name only (ignore size completely)
+    // For fish butchers: If size is 'default', match by item name only; otherwise match by item name + size
+    const isDefaultSize = normalizedSize === 'default';
+    
+    // Skip header row
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length === 0) continue;
+      
+      const menuItem = normalizeItemName(row[0] || '');
+      
+      // For meat butchers, ONLY check item name (completely ignore size parameter)
+      if (isMeat) {
+        if (menuItem === normalizedItemName) {
+          // Ensure we have the price column
+          if (row.length > priceColumn) {
+            const price = parseFloat(row[priceColumn]) || 0;
+            if (price > 0) {
+              return price;
+            }
+          }
+        }
+      } else {
+        // For fish butchers
+        if (menuItem === normalizedItemName) {
+          // If size is 'default', match by item name only (return first matching price)
+          if (isDefaultSize) {
+            if (row.length > priceColumn) {
+              const price = parseFloat(row[priceColumn]) || 0;
+              if (price > 0) {
+              return price;
+              }
+            }
+          } else {
+            // If size is 'small', 'medium', or 'big', match by item name + size
+            if (row.length > sizeColumn && row.length > priceColumn) {
+              const menuSize = (row[sizeColumn] || '').toLowerCase().trim();
+              if (menuSize === normalizedSize) {
+                const price = parseFloat(row[priceColumn]) || 0;
+                if (price > 0) {
+                  return price;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // ✅ FIX: If size was 'default' and no match found for fish butchers, try to find any size for this item
+    // This handles edge cases where item exists but we need a fallback
+    // Note: This fallback is NOT needed for meat butchers since they don't have sizes
+    if (isDefaultSize && !isMeat) {
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length === 0) continue;
+        
+        const menuItem = normalizeItemName(row[0] || '');
+        if (menuItem === normalizedItemName) {
+          if (row.length > priceColumn) {
+            const price = parseFloat(row[priceColumn]) || 0;
+            if (price > 0) {
+              const menuSize = row.length > sizeColumn ? (row[sizeColumn] || 'any') : 'any';
+              return price;
+            }
+          }
+        }
+      }
+    }
+    
+    // No match found - return 0
+    
+    return 0;
+  } catch (error) {
+    console.error(`[Order] Error fetching purchase price for "${itemName}" in ${butcherId}:`, error);
+    return 0;
+  }
 };

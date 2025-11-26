@@ -192,16 +192,25 @@ export function RateLimitMonitor() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-semibold">Rate Limit Monitor</h2>
-            <p className="text-muted-foreground">System health and API usage monitoring</p>
-          </div>
-        </div>
+        <Card>
+          <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                  <Activity className="h-5 w-5 flex-shrink-0" />
+                  Rate Limit Monitor
+                </CardTitle>
+                <CardDescription className="text-sm mt-1">
+                  System health and API usage monitoring
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[...Array(4)].map((_, i) => (
-            <Card key={i}>
-              <CardContent className="p-6">
+            <Card key={i} className="w-full max-w-full">
+              <CardContent className="p-4 sm:p-6">
                 <div className="animate-pulse">
                   <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
                   <div className="h-8 bg-gray-200 rounded w-1/2"></div>
@@ -217,16 +226,25 @@ export function RateLimitMonitor() {
   if (error) {
     return (
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-semibold">Rate Limit Monitor</h2>
-            <p className="text-muted-foreground">System health and API usage monitoring</p>
-          </div>
-          <Button onClick={fetchData} variant="outline">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Retry
-          </Button>
-        </div>
+        <Card>
+          <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                  <Activity className="h-5 w-5 flex-shrink-0" />
+                  Rate Limit Monitor
+                </CardTitle>
+                <CardDescription className="text-sm mt-1">
+                  System health and API usage monitoring
+                </CardDescription>
+              </div>
+              <Button onClick={fetchData} variant="outline" size="sm" className="text-xs sm:text-sm">
+                <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                Retry
+              </Button>
+            </div>
+          </CardHeader>
+        </Card>
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -241,37 +259,49 @@ export function RateLimitMonitor() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-semibold">Rate Limit Monitor</h2>
-          <p className="text-muted-foreground">
-            System health and Google Sheets API usage monitoring
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant={autoRefresh ? "default" : "outline"}
-            size="sm"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-          >
-            <Activity className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-pulse' : ''}`} />
-            Auto-refresh {autoRefresh ? 'ON' : 'OFF'}
-          </Button>
-          <Button onClick={fetchData} variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <Card>
+        <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                <Activity className="h-5 w-5 flex-shrink-0" />
+                Rate Limit Monitor
+              </CardTitle>
+              <CardDescription className="text-sm mt-1">
+                System health and Google Sheets API usage monitoring
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <Button
+                variant={autoRefresh ? "default" : "outline"}
+                size="sm"
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className="text-xs sm:text-sm"
+              >
+                <Activity className={`h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 ${autoRefresh ? 'animate-pulse' : ''}`} />
+                <span className="hidden sm:inline">Auto-refresh {autoRefresh ? 'ON' : 'OFF'}</span>
+                <span className="sm:hidden">Auto {autoRefresh ? 'ON' : 'OFF'}</span>
+              </Button>
+              <Button onClick={fetchData} variant="outline" size="sm" className="text-xs sm:text-sm">
+                <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">Refresh</span>
+                <span className="sm:hidden">Refresh</span>
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
 
       {/* System Health Overview */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card className="w-full max-w-full">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
             <CardTitle className="text-sm font-medium">System Status</CardTitle>
-            {getStatusIcon(data.systemHealth.status)}
+            <div className="flex-shrink-0">
+              {getStatusIcon(data.systemHealth.status)}
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className={`text-2xl font-bold ${getStatusColor(data.systemHealth.status)}`}>
               {data.systemHealth.status.toUpperCase()}
             </div>
@@ -281,12 +311,12 @@ export function RateLimitMonitor() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card className="w-full max-w-full">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
             <CardTitle className="text-sm font-medium">API Quota Usage</CardTitle>
-            <Zap className="h-4 w-4 text-muted-foreground" />
+            <Zap className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="text-2xl font-bold">{Math.round(data.systemHealth.quotaPercentage)}%</div>
             <Progress value={data.systemHealth.quotaPercentage} className="mt-2" />
             <p className="text-xs text-muted-foreground mt-1">
@@ -295,12 +325,12 @@ export function RateLimitMonitor() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card className="w-full max-w-full">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
             <CardTitle className="text-sm font-medium">Response Time</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
+            <Clock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="text-2xl font-bold">{Math.round(data.systemHealth.responseTime)}ms</div>
             <p className="text-xs text-muted-foreground">
               Average response time
@@ -308,12 +338,12 @@ export function RateLimitMonitor() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card className="w-full max-w-full">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
             <CardTitle className="text-sm font-medium">System Uptime</CardTitle>
-            <Server className="h-4 w-4 text-muted-foreground" />
+            <Server className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="text-2xl font-bold">{formatUptime(data.systemHealth.uptime)}</div>
             <p className="text-xs text-muted-foreground">
               Error rate: {data.systemHealth.errorRate.toFixed(1)}%
@@ -567,30 +597,35 @@ export function RateLimitMonitor() {
               <CardDescription>Hourly breakdown of API calls and response times</CardDescription>
             </CardHeader>
             <CardContent>
-              <ChartContainer config={chartConfig} className="h-[400px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.hourlyBreakdown}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="hour" />
-                    <YAxis />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Area 
-                      type="monotone" 
-                      dataKey="calls" 
-                      stroke="var(--color-calls)" 
-                      fill="var(--color-calls)" 
-                      fillOpacity={0.6}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="errors" 
-                      stroke="var(--color-errors)" 
-                      fill="var(--color-errors)" 
-                      fillOpacity={0.6}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </ChartContainer>
+              {/* ✅ FIX: Scrollable chart container */}
+              <div className="w-full overflow-x-auto">
+                <div className="min-w-[500px]">
+                  <ChartContainer config={chartConfig} className="h-[400px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={data.hourlyBreakdown}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="hour" />
+                        <YAxis />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Area 
+                          type="monotone" 
+                          dataKey="calls" 
+                          stroke="var(--color-calls)" 
+                          fill="var(--color-calls)" 
+                          fillOpacity={0.6}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="errors" 
+                          stroke="var(--color-errors)" 
+                          fill="var(--color-errors)" 
+                          fillOpacity={0.6}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

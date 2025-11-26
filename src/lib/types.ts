@@ -22,7 +22,7 @@ export interface MenuCategory {
 }
 
 export interface Butcher {
-  id: 'usaj' | 'usaj_mutton' | 'pkd' | 'kak' | 'ka_sons' | 'alif';
+  id: 'usaj' | 'usaj_mutton' | 'pkd' | 'kak' | 'ka_sons' | 'alif' | 'test_meat' | 'test_fish';
   name: string;
   password: string;
   menu: MenuCategory[];
@@ -57,6 +57,8 @@ export interface Order {
   butcherId?: string; // ID of the butcher assigned to this order
   butcherName?: string; // Name of the butcher assigned to this order
   finalWeight?: number; // Final weight after preparation
+  _source?: 'central-api' | 'sheet'; // Source of the order
+  _receivedAt?: Date; // When order was received
 }
 
 export interface CommissionRate {

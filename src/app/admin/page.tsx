@@ -40,14 +40,15 @@ import {
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "../../components/ui/chart"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Line, LineChart, Area, AreaChart, ResponsiveContainer } from "recharts"
 import { format } from "date-fns"
-import { useState, useEffect, useCallback } from "react"
-import { useOrderPolling } from "../../hooks/useOrderPolling"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { useOrderCache } from "../../hooks/useOrderCache"
 import { useClientCache } from "../../hooks/useClientCache"
 import { freshButchers } from "../../lib/freshMockData"
 import { CommissionMarkupSettings } from "../../components/admin/CommissionMarkupSettings"
 import { OrdersAnalytics } from "../../components/admin/OrdersAnalytics"
 import DAMAnalysis from "../../components/admin/DAMAnalysis"
 import { RateLimitMonitor } from "../../components/admin/RateLimitMonitor"
+import { ThemeToggle } from "../../components/ThemeToggle"
 
 // Helper function to extract order number from full order ID for display
 const getDisplayOrderId = (orderId: string): string => {
@@ -80,7 +81,8 @@ export default function AdminPage() {
     end: format(new Date(), 'yyyy-MM-dd')
   });
   const [allOrders, setAllOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [supportRequests, setSupportRequests] = useState<any[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [adminResponse, setAdminResponse] = useState('');
@@ -93,6 +95,7 @@ export default function AdminPage() {
   const [lastSupportUpdate, setLastSupportUpdate] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pollingEnabled, setPollingEnabled] = useState(true);
+  const tabsListRef = useRef<HTMLDivElement>(null);
 
   // Redirect if not admin
   useEffect(() => {
@@ -101,45 +104,163 @@ export default function AdminPage() {
     }
   }, [isAdmin]);
 
-  // Fetch orders for all butchers
+  // Ensure tabs start from the beginning (scroll to left on mount and after render)
+  useEffect(() => {
+    const scrollToStart = () => {
+      if (tabsListRef.current) {
+        // Use both scrollLeft and scrollTo for maximum compatibility
+        tabsListRef.current.scrollLeft = 0;
+        tabsListRef.current.scrollTo({ left: 0, behavior: 'auto' });
+      }
+    };
+    
+    // Multiple attempts to ensure scroll happens after DOM is ready
+    scrollToStart();
+    
+    // Use requestAnimationFrame for next frame
+    requestAnimationFrame(() => {
+      scrollToStart();
+      // Also try after a short delay
+      setTimeout(scrollToStart, 50);
+      setTimeout(scrollToStart, 150);
+      setTimeout(scrollToStart, 300);
+    });
+    
+    // Scroll on window resize (mobile orientation changes, etc.)
+    window.addEventListener('resize', scrollToStart);
+    
+    // Also listen for scroll events to prevent drift
+    const handleScroll = () => {
+      if (tabsListRef.current && tabsListRef.current.scrollLeft < 0) {
+        scrollToStart();
+      }
+    };
+    
+    if (tabsListRef.current) {
+      tabsListRef.current.addEventListener('scroll', handleScroll);
+    }
+    
+    return () => {
+      window.removeEventListener('resize', scrollToStart);
+      if (tabsListRef.current) {
+        tabsListRef.current.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, []);
+
+  // Helper function to delay between API calls (rate limiting)
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // Fetch orders for all butchers from sheets (not cache) with rate limiting
   const fetchAllOrders = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
+      const token = localStorage.getItem('jwt_token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
       const butcherIds = freshButchers.map(b => b.id);
-      const orderPromises = butcherIds.map(async (butcherId) => {
+      const allOrdersData: Order[] = [];
+
+      // Rate limiting: Add delay between requests to avoid quota errors
+      // Google Sheets API limit: 100 requests per minute per user
+      // We'll add 600ms delay between requests = ~100 requests per minute max
+      const DELAY_BETWEEN_REQUESTS = 600; // 600ms = ~100 requests/minute
+
+      // Fetch all orders from sheets for each butcher (with pagination and rate limiting)
+      for (let i = 0; i < butcherIds.length; i++) {
+        const butcherId = butcherIds[i];
         try {
-          const response = await fetch(`/api/orders/${butcherId}`);
-          if (response.ok) {
-            const responseData = await response.json();
-            // The API returns { orders: [...] }, so we need to extract the orders array
-            const orders = responseData.orders || responseData;
-            // Ensure orders is an array before mapping
-            if (Array.isArray(orders)) {
-              return orders.map((order: Order) => ({
-                ...order,
-                butcherId,
-                butcherName: freshButchers.find(b => b.id === butcherId)?.name || butcherId
-              }));
-            } else {
-              return [];
+          let page = 1;
+          let hasMore = true;
+
+          // Fetch all pages sequentially with rate limiting
+          while (hasMore) {
+            // Add delay before each request (except the first one)
+            if (page > 1 || i > 0) {
+              await delay(DELAY_BETWEEN_REQUESTS);
             }
+
+            const response = await fetch(`/api/analytics/${butcherId}?page=${page}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              const errorMessage = errorData.message || errorData.error || 'Failed to fetch analytics data';
+              
+              // Check for quota errors
+              if (response.status === 429 || errorMessage.includes('Quota exceeded') || errorMessage.includes('quota')) {
+                const quotaError = 'Google Sheets API quota exceeded. Please wait a minute and try again.';
+                setError(quotaError);
+                toast({
+                  variant: "destructive",
+                  title: "Rate Limit Exceeded",
+                  description: quotaError,
+                });
+                // Stop fetching and return what we have so far
+                setAllOrders(allOrdersData);
+                setIsLoading(false);
+                return;
+              }
+              
+              throw new Error(errorMessage);
+            }
+
+            const data = await response.json();
+            const orders = (data.orders || []).map((order: Order) => ({
+              ...order,
+              butcherId,
+              butcherName: freshButchers.find(b => b.id === butcherId)?.name || butcherId
+            }));
+            
+            allOrdersData.push(...orders);
+            
+            hasMore = data.pagination?.hasMore || false;
+            page++;
           }
-          return [];
-        } catch (error) {
-          return [];
+        } catch (error: any) {
+          console.error(`Error fetching orders for ${butcherId}:`, error);
+          
+          // If it's a quota error, stop and show error
+          if (error.message?.includes('Quota exceeded') || error.message?.includes('quota')) {
+            const quotaError = 'Google Sheets API quota exceeded. Please wait a minute and try again.';
+            setError(quotaError);
+            toast({
+              variant: "destructive",
+              title: "Rate Limit Exceeded",
+              description: quotaError,
+            });
+            setAllOrders(allOrdersData);
+            setIsLoading(false);
+            return;
+          }
+          
+          // Continue with other butchers even if one fails (non-quota errors)
         }
-      });
+      }
+
+      setAllOrders(allOrdersData);
       
-      const allOrdersResults = await Promise.all(orderPromises);
-      // Ensure all results are arrays before flattening
-      const validResults = allOrdersResults.filter(Array.isArray);
-      const flatOrders = validResults.flat();
-      setAllOrders(flatOrders);
-    } catch (error) {
+      if (allOrdersData.length > 0) {
+        toast({
+          title: "Data Loaded",
+          description: `Loaded ${allOrdersData.length} orders from sheets.`,
+        });
+      }
+    } catch (error: any) {
+      console.error('Error fetching orders:', error);
+      const errorMessage = error.message || "Failed to fetch orders data from sheets.";
+      setError(errorMessage);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to fetch orders data.",
+        description: errorMessage,
       });
     } finally {
       setIsLoading(false);
@@ -476,84 +597,88 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <p className="text-muted-foreground">Monitor all butchers and system performance</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={handleManualRefresh} disabled={isRefreshing} variant="outline" size="sm">
-            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh Support'}
-          </Button>
-          <Button onClick={fetchAllOrders} disabled={isLoading} variant="outline" size="sm">
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh Orders
-          </Button>
-          <Button
-            variant={pollingEnabled ? "default" : "outline"}
-            size="sm"
-            onClick={() => setPollingEnabled(!pollingEnabled)}
-          >
-            {pollingEnabled ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
-          </Button>
-          <Button onClick={logout} variant="outline" size="sm">
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-background">
+      {/* ✅ FIX: Add proper container with margins and responsive padding - prevent horizontal overflow */}
+      <div className="w-full max-w-full overflow-x-hidden px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+        <div className="space-y-4 sm:space-y-6">
+          {/* ✅ FIX: Responsive header */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold">Admin Dashboard</h1>
+              <p className="text-sm sm:text-base text-muted-foreground mt-1">Monitor all butchers and system performance</p>
+            </div>
+            {/* ✅ FIX: Responsive button group */}
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <ThemeToggle />
+              <Button onClick={logout} variant="outline" size="sm" className="text-xs sm:text-sm">
+                <LogOut className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">Logout</span>
+              </Button>
+            </div>
+          </div>
 
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-8">
-          <TabsTrigger value="overview" className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="butchers" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Butchers
-          </TabsTrigger>
-          <TabsTrigger value="analytics" className="flex items-center gap-2">
-            <TrendingUp className="h-4 w-4" />
-            Analytics
-          </TabsTrigger>
-          <TabsTrigger value="dam-analysis" className="flex items-center gap-2">
-            <Target className="h-4 w-4" />
-            D.A.M Analysis
-          </TabsTrigger>
-          <TabsTrigger value="rate-monitor" className="flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Rate Monitor
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center gap-2">
-            <Bell className="h-4 w-4" />
-            Notifications
-            {unreadNotifications > 0 && (
-              <Badge variant="destructive" className="ml-1 h-5 w-5 rounded-full p-0 text-xs">
-                {unreadNotifications}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="support" className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            Support
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            Settings
-          </TabsTrigger>
-        </TabsList>
+          <Tabs defaultValue="overview" className="w-full">
+            <TabsList 
+              ref={tabsListRef} 
+              className="w-full overflow-x-auto flex sm:grid sm:grid-cols-8 gap-1 sm:gap-2 p-1 sm:p-1 h-auto sm:h-10 px-0 sm:px-1 scrollbar-hide justify-start"
+              style={{ scrollBehavior: 'smooth' }}
+            >
+              <TabsTrigger value="overview" className="flex items-center gap-2 whitespace-nowrap pl-4 pr-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <BarChart3 className="h-4 w-4 flex-shrink-0" />
+                <span>Overview</span>
+              </TabsTrigger>
+              <TabsTrigger value="butchers" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <Users className="h-4 w-4 flex-shrink-0" />
+                <span>Butchers</span>
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <TrendingUp className="h-4 w-4 flex-shrink-0" />
+                <span>Analytics</span>
+              </TabsTrigger>
+              <TabsTrigger value="dam-analysis" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <Target className="h-4 w-4 flex-shrink-0" />
+                <span className="hidden sm:inline">D.A.M Analysis</span>
+                <span className="sm:hidden">D.A.M</span>
+              </TabsTrigger>
+              <TabsTrigger value="rate-monitor" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <Activity className="h-4 w-4 flex-shrink-0" />
+                <span className="hidden sm:inline">Rate Monitor</span>
+                <span className="sm:hidden">Rates</span>
+              </TabsTrigger>
+              <TabsTrigger value="notifications" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit relative">
+                <Bell className="h-4 w-4 flex-shrink-0" />
+                <span className="hidden sm:inline">Notifications</span>
+                <span className="sm:hidden">Alerts</span>
+                {unreadNotifications > 0 && (
+                  <Badge variant="destructive" className="ml-1 h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center absolute -top-1 -right-1">
+                    {unreadNotifications}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="support" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <MessageSquare className="h-4 w-4 flex-shrink-0" />
+                <span>Support</span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="flex items-center gap-2 whitespace-nowrap pl-3 pr-4 sm:px-4 flex-shrink-0 min-w-fit">
+                <Settings className="h-4 w-4 flex-shrink-0" />
+                <span>Settings</span>
+              </TabsTrigger>
+            </TabsList>
 
-        {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-6">
+            {/* Overview Tab */}
+            <TabsContent value="overview" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           {/* Time Frame Selector */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Time Frame Selection</CardTitle>
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg sm:text-xl">Time Frame Selection</CardTitle>
+                <Button onClick={fetchAllOrders} disabled={isLoading} variant="outline" size="sm">
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  {isLoading ? 'Refreshing...' : 'Refresh Orders'}
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
               <div className="flex flex-wrap gap-4 items-end">
                 <div className="space-y-2">
                   <Label>Butcher</Label>
@@ -613,160 +738,266 @@ export default function AdminPage() {
 
           {/* Key Metrics */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Card className="w-full max-w-full">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
                 <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <IndianRupee className="h-4 w-4 text-muted-foreground" />
+                <IndianRupee className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{totalRevenue.toLocaleString('en-IN')}</div>
-                <p className="text-xs text-muted-foreground">
-                  {timeFrame} revenue from {selectedButcher === 'all' ? 'all butchers' : freshButchers.find(b => b.id === selectedButcher)?.name}
-                </p>
+              <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
+                {isLoading ? (
+                  <>
+                    <Skeleton className="h-8 w-32 mb-2" />
+                    <Skeleton className="h-4 w-48" />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-2xl font-bold">₹{totalRevenue.toLocaleString('en-IN')}</div>
+                    <p className="text-xs text-muted-foreground">
+                      {timeFrame} revenue from {selectedButcher === 'all' ? 'all butchers' : freshButchers.find(b => b.id === selectedButcher)?.name}
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Card className="w-full max-w-full">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
                 <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                <ShoppingCart className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{totalOrders}</div>
-                <p className="text-xs text-muted-foreground">
-                  {completedOrders.length} completed, {declinedOrders.length} declined
-                </p>
+              <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
+                {isLoading ? (
+                  <>
+                    <Skeleton className="h-8 w-16 mb-2" />
+                    <Skeleton className="h-4 w-40" />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-2xl font-bold">{totalOrders}</div>
+                    <p className="text-xs text-muted-foreground">
+                      {completedOrders.length} completed, {declinedOrders.length} declined
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Card className="w-full max-w-full">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
                 <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
-                <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                <CheckCircle className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{completionRate.toFixed(1)}%</div>
-                <p className="text-xs text-muted-foreground">
-                  Orders completed successfully
-                </p>
+              <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
+                {isLoading ? (
+                  <>
+                    <Skeleton className="h-8 w-20 mb-2" />
+                    <Skeleton className="h-4 w-32" />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-2xl font-bold">{completionRate.toFixed(1)}%</div>
+                    <p className="text-xs text-muted-foreground">
+                      Orders completed successfully
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Card className="w-full max-w-full">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
                 <CardTitle className="text-sm font-medium">Avg. Prep Time</CardTitle>
-                <Timer className="h-4 w-4 text-muted-foreground" />
+                <Timer className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{avgPrepTime.toFixed(1)} min</div>
-                <p className="text-xs text-muted-foreground">
-                  Average preparation time
-                </p>
+              <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
+                {isLoading ? (
+                  <>
+                    <Skeleton className="h-8 w-20 mb-2" />
+                    <Skeleton className="h-4 w-36" />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-2xl font-bold">{avgPrepTime.toFixed(1)} min</div>
+                    <p className="text-xs text-muted-foreground">
+                      Average preparation time
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Charts */}
+          {/* Charts with internal horizontal scroll on mobile */}
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Revenue by Butcher</CardTitle>
-                <CardDescription>Revenue distribution across butchers</CardDescription>
+            <Card className="w-full max-w-full overflow-hidden">
+              <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+                <CardTitle className="text-lg sm:text-xl">Revenue by Butcher</CardTitle>
+                <CardDescription className="text-sm mt-1">Revenue distribution across butchers</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                  <BarChart data={revenueChartData}>
-                    <CartesianGrid vertical={false} />
-                    <XAxis dataKey="name" tickLine={false} axisLine={false} />
-                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value}`} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
-                  </BarChart>
-                </ChartContainer>
+              <CardContent className="px-0 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+                {isLoading ? (
+                  <div className="h-[300px] flex items-center justify-center">
+                    <Skeleton className="h-[300px] w-full" />
+                  </div>
+                ) : revenueChartData.length === 0 ? (
+                  <div className="h-[300px] flex items-center justify-center">
+                    <div className="text-center">
+                      <BarChart3 className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground">No revenue data available</p>
+                      <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full overflow-x-auto scrollbar-hide">
+                    <div className="min-w-[600px] px-4 sm:px-6">
+                      <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                        <BarChart data={revenueChartData}>
+                          <CartesianGrid vertical={false} />
+                          <XAxis dataKey="name" tickLine={false} axisLine={false} angle={-45} textAnchor="end" height={60} />
+                          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value}`} />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
+                        </BarChart>
+                      </ChartContainer>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Revenue Trend</CardTitle>
-                <CardDescription>Revenue distribution by butcher over time</CardDescription>
+            <Card className="w-full max-w-full overflow-hidden">
+              <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+                <CardTitle className="text-lg sm:text-xl">Revenue Trend</CardTitle>
+                <CardDescription className="text-sm mt-1">Revenue distribution by butcher over time</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                  <AreaChart data={revenueChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis tickFormatter={(value) => `₹${value}`} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Area 
-                      type="monotone" 
-                      dataKey="revenue" 
-                      stroke="#8884d8" 
-                      fill="#8884d8" 
-                      fillOpacity={0.6}
-                    />
-                  </AreaChart>
-                </ChartContainer>
+              <CardContent className="px-0 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+                {isLoading ? (
+                  <div className="h-[300px] flex items-center justify-center">
+                    <Skeleton className="h-[300px] w-full" />
+                  </div>
+                ) : revenueChartData.length === 0 ? (
+                  <div className="h-[300px] flex items-center justify-center">
+                    <div className="text-center">
+                      <TrendingUp className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground">No revenue data available</p>
+                      <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full overflow-x-auto scrollbar-hide">
+                    <div className="min-w-[600px] px-4 sm:px-6">
+                      <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                        <AreaChart data={revenueChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} />
+                          <YAxis tickFormatter={(value) => `₹${value}`} />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Area 
+                            type="monotone" 
+                            dataKey="revenue" 
+                            stroke="#8884d8" 
+                            fill="#8884d8" 
+                            fillOpacity={0.6}
+                          />
+                        </AreaChart>
+                      </ChartContainer>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
         {/* Butchers Tab */}
-        <TabsContent value="butchers" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Butcher Performance</CardTitle>
-              <CardDescription>Individual butcher performance metrics</CardDescription>
+            <TabsContent value="butchers" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg sm:text-xl">Butcher Performance</CardTitle>
+                  <CardDescription className="text-sm mt-1">Individual butcher performance metrics</CardDescription>
+                </div>
+                <Button onClick={fetchAllOrders} disabled={isLoading} variant="outline" size="sm">
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  {isLoading ? 'Refreshing...' : 'Refresh Orders'}
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Butcher</TableHead>
-                    <TableHead>Total Orders</TableHead>
-                    <TableHead>Completed</TableHead>
-                    <TableHead>Completion Rate</TableHead>
-                    <TableHead className="text-right">Revenue</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {butcherPerformance.map((butcher) => (
-                    <TableRow key={butcher.id}>
-                      <TableCell className="font-medium">{butcher.name}</TableCell>
-                      <TableCell>{butcher.totalOrders}</TableCell>
-                      <TableCell>{butcher.completedOrders}</TableCell>
-                      <TableCell>
-                        <Badge variant={butcher.completionRate >= 80 ? "default" : butcher.completionRate >= 60 ? "secondary" : "destructive"}>
-                          {butcher.completionRate.toFixed(1)}%
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">₹{butcher.revenue.toLocaleString('en-IN')}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+              {isLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : butcherPerformance.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No butcher performance data available</p>
+                  <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
+                </div>
+              ) : (
+                <div className="w-full overflow-x-auto -mx-4 sm:-mx-6 scrollbar-hide">
+                  <div className="min-w-[600px] px-4 sm:px-6">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Butcher</TableHead>
+                          <TableHead>Total Orders</TableHead>
+                          <TableHead>Completed</TableHead>
+                          <TableHead>Completion Rate</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {butcherPerformance.map((butcher) => (
+                          <TableRow key={butcher.id}>
+                            <TableCell className="font-medium">{butcher.name}</TableCell>
+                            <TableCell>{butcher.totalOrders}</TableCell>
+                            <TableCell>{butcher.completedOrders}</TableCell>
+                            <TableCell>
+                              <Badge variant={butcher.completionRate >= 80 ? "default" : butcher.completionRate >= 60 ? "secondary" : "destructive"}>
+                                {butcher.completionRate.toFixed(1)}%
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">₹{butcher.revenue.toLocaleString('en-IN')}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-6">
-          <OrdersAnalytics />
+            <TabsContent value="analytics" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <OrdersAnalytics 
+            allOrders={allOrders} 
+            onRefresh={fetchAllOrders}
+            isLoading={isLoading}
+          />
         </TabsContent>
 
         {/* D.A.M Analysis Tab */}
-        <TabsContent value="dam-analysis" className="space-y-6">
-          <DAMAnalysis />
+            <TabsContent value="dam-analysis" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <DAMAnalysis 
+            allOrders={allOrders} 
+            onRefresh={fetchAllOrders}
+            isLoading={isLoading}
+          />
         </TabsContent>
 
         {/* Rate Monitor Tab */}
-        <TabsContent value="rate-monitor" className="space-y-6">
+            <TabsContent value="rate-monitor" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           <RateLimitMonitor />
         </TabsContent>
 
         {/* Notifications Tab */}
-        <TabsContent value="notifications" className="space-y-6">
+            <TabsContent value="notifications" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-semibold">Notifications</h2>
@@ -867,7 +1098,7 @@ export default function AdminPage() {
         </TabsContent>
 
         {/* Support Tab */}
-        <TabsContent value="support" className="space-y-6">
+            <TabsContent value="support" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-semibold">Support Requests</h2>
@@ -935,19 +1166,21 @@ export default function AdminPage() {
                       </div>
                     )}
                     
-                    {request.packingRequests && (
+                    {request.packingRequests && Array.isArray(request.packingRequests) && request.packingRequests.length > 0 && (
                       <div>
                         <Label className="text-sm font-medium">Packing Request:</Label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                          {Object.entries(request.packingRequests).map(([size, count]) => {
-                            const numCount = count as number;
-                            return numCount > 0 && (
-                              <div key={size} className="flex justify-between items-center p-2 bg-background rounded border">
-                                <span className="text-sm">{size} bags</span>
-                                <Badge variant="outline">{numCount}</Badge>
+                          {request.packingRequests.map((size: string) => (
+                            <div key={size} className="flex items-center justify-between p-2 bg-background rounded border">
+                              <div className="flex items-center gap-2">
+                                <span className="text-green-600 font-bold">✓</span>
+                                <span className="text-sm">{size}</span>
                               </div>
-                            );
-                          })}
+                              <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400">
+                                Selected
+                              </Badge>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -1042,24 +1275,26 @@ export default function AdminPage() {
           )}
         </TabsContent>
 
-        {/* Settings Tab */}
-        <TabsContent value="settings" className="space-y-6">
-          <CommissionMarkupSettings />
-        </TabsContent>
-      </Tabs>
+            {/* Settings Tab */}
+            <TabsContent value="settings" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+              <CommissionMarkupSettings />
+            </TabsContent>
+          </Tabs>
 
-      {/* Confirmation Dialog */}
-      <ConfirmationDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        title="Delete Support Request"
-        description="Are you sure you want to delete this support request? This action cannot be undone."
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="destructive"
-        onConfirm={confirmDelete}
-        isLoading={isDeleting}
-      />
+          {/* Confirmation Dialog */}
+          <ConfirmationDialog
+            open={deleteDialogOpen}
+            onOpenChange={setDeleteDialogOpen}
+            title="Delete Support Request"
+            description="Are you sure you want to delete this support request? This action cannot be undone."
+            confirmText="Delete"
+            cancelText="Cancel"
+            variant="destructive"
+            onConfirm={confirmDelete}
+            isLoading={isDeleting}
+          />
+        </div>
+      </div>
     </div>
   )
 }

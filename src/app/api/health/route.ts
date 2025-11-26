@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiMonitor } from '@/lib/apiMonitor';
+// Import menu update worker to ensure it starts
+import '@/lib/menuUpdateWorker';
 
 export async function GET() {
   try {

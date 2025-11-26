@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   Target, 
   TrendingUp, 
@@ -23,9 +24,11 @@ import {
   IndianRupee,
   Lightbulb,
   TrendingDown,
-  Activity
+  Activity,
+  RefreshCw
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import type { Order } from '@/lib/types';
 
 interface WeeklyTarget {
   week: number;
@@ -71,16 +74,26 @@ interface ButcherSalesSummary {
   orderCount: number;
 }
 
-const DAMAnalysis: React.FC = () => {
+interface DAMAnalysisProps {
+  allOrders: Order[]; // Order[] from parent
+  onRefresh?: () => void; // Parent refresh function
+  isLoading?: boolean; // Parent loading state
+}
+
+const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, isLoading: externalIsLoading = false }) => {
   const [monthlyTarget, setMonthlyTarget] = useState<MonthlyTarget | null>(null);
   const [salesData, setSalesData] = useState<SalesData[]>([]);
   const [butcherSummary, setButcherSummary] = useState<ButcherSalesSummary[]>([]);
   const [weeklyTargets, setWeeklyTargets] = useState<WeeklyTarget[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [targetInput, setTargetInput] = useState('');
+  const tabsListRef = useRef<HTMLDivElement>(null);
+  const isInitialMount = useRef(true);
+  const isLoadingRef = useRef(false);
 
   // Generate month options
   const months = [
@@ -102,14 +115,53 @@ const DAMAnalysis: React.FC = () => {
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
+  // Ensure tabs start from the beginning (scroll to left on mount and after render)
   useEffect(() => {
-    loadMonthlyTarget();
-    loadSalesData();
-  }, [selectedMonth, selectedYear]);
+    const scrollToStart = () => {
+      if (tabsListRef.current) {
+        // Use both scrollLeft and scrollTo for maximum compatibility
+        tabsListRef.current.scrollLeft = 0;
+        tabsListRef.current.scrollTo({ left: 0, behavior: 'auto' });
+      }
+    };
+    
+    // Multiple attempts to ensure scroll happens after DOM is ready
+    scrollToStart();
+    
+    // Use requestAnimationFrame for next frame
+    requestAnimationFrame(() => {
+      scrollToStart();
+      // Also try after a short delay
+      setTimeout(scrollToStart, 50);
+      setTimeout(scrollToStart, 150);
+      setTimeout(scrollToStart, 300);
+    });
+    
+    // Scroll on window resize (mobile orientation changes, etc.)
+    window.addEventListener('resize', scrollToStart);
+    
+    // Also listen for scroll events to prevent drift
+    const handleScroll = () => {
+      if (tabsListRef.current && tabsListRef.current.scrollLeft < 0) {
+        scrollToStart();
+      }
+    };
+    
+    if (tabsListRef.current) {
+      tabsListRef.current.addEventListener('scroll', handleScroll);
+    }
+    
+    return () => {
+      window.removeEventListener('resize', scrollToStart);
+      if (tabsListRef.current) {
+        tabsListRef.current.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, []);
 
-  const loadMonthlyTarget = async () => {
+  const loadMonthlyTarget = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setError(null);
       const response = await fetch(`/api/dam-analysis/target?month=${selectedMonth}&year=${selectedYear}`);
       
       if (response.ok) {
@@ -119,45 +171,229 @@ const DAMAnalysis: React.FC = () => {
       } else {
         setMonthlyTarget(null);
         setTargetInput('');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to load monthly target data');
       }
-    } catch (error) {
-      console.error('Error loading monthly target:', error);
+    } catch (error: any) {
+      setError(error.message || 'Try again later');
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to load monthly target data."
+        description: error.message || "Failed to load monthly target data."
       });
-    } finally {
-      setIsLoading(false);
     }
-  };
+  }, [selectedMonth, selectedYear, toast]);
 
-  const loadSalesData = async () => {
+  // Calculate sales data from allOrders instead of fetching from API
+  const calculateSalesDataFromOrders = useCallback(() => {
     try {
-      setIsLoading(true);
-      const response = await fetch(`/api/dam-analysis/sales?month=${selectedMonth}&year=${selectedYear}`);
+      setError(null);
       
-      if (response.ok) {
-        const data = await response.json();
-        setSalesData(data.salesData || []);
-        setButcherSummary(data.butcherSummary || []);
-        setWeeklyTargets(data.weeklyTargets || []);
-      } else {
-        setSalesData([]);
-        setButcherSummary([]);
-        setWeeklyTargets([]);
-      }
-    } catch (error) {
-      console.error('Error loading sales data:', error);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to load sales data."
+      // Filter orders by selected month/year and status (only completed orders)
+      const filteredOrders = allOrders.filter(order => {
+        if (order.status !== 'completed') return false;
+        
+        const orderDate = new Date(order.orderTime);
+        return orderDate.getMonth() + 1 === selectedMonth && orderDate.getFullYear() === selectedYear;
       });
-    } finally {
-      setIsLoading(false);
+
+      // Convert orders to SalesData format
+      const calculatedSalesData: SalesData[] = filteredOrders.map(order => {
+        const orderDate = new Date(order.orderTime);
+        const orderDateStr = `${String(orderDate.getDate()).padStart(2, '0')}/${String(orderDate.getMonth() + 1).padStart(2, '0')}/${orderDate.getFullYear()}`;
+        
+        // Extract order number from order ID
+        const orderIdParts = order.id.replace('ORD-', '').split('-');
+        const orderNo = orderIdParts[orderIdParts.length - 1] || '';
+        
+        // Format items, quantities, sizes, cut types, preparing weights
+        const items = order.items.map(item => item.name).join(', ');
+        const quantities = order.items.map(item => `${item.quantity}${item.unit || 'kg'}`).join(', ');
+        const sizes = order.items.map(item => item.size || 'default').join(', ');
+        const cutTypes = order.items.map(item => item.cutType || '').join(', ');
+        
+        // Preparing weights: use itemWeights (fish) or itemQuantities (meat)
+        const isFishButcher = ['kak', 'ka_sons', 'alif','test_fish'].includes(order.butcherId || '');
+        const preparingWeights = order.items.map(item => {
+          const weight = isFishButcher 
+            ? (order.itemWeights?.[item.name] || `${item.quantity}kg`)
+            : (order.itemQuantities?.[item.name] || `${item.quantity}kg`);
+          return `${item.name}: ${weight}`;
+        }).join(', ');
+        
+        // Completion time
+        let completionTime = '';
+        if (order.preparationStartTime && order.preparationEndTime) {
+          const start = new Date(order.preparationStartTime);
+          const end = new Date(order.preparationEndTime);
+          const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+          completionTime = diffMinutes <= 20 ? `${diffMinutes}min` : orderDateStr;
+        }
+        
+        // Start time
+        const startTime = order.preparationStartTime 
+          ? new Date(order.preparationStartTime).toLocaleString('en-GB', { 
+              day: '2-digit', 
+              month: '2-digit', 
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: false
+            }).replace(',', '')
+          : '';
+        
+        // Sales Revenue: Calculate from item revenues (selling price total)
+        // If itemRevenues exists, sum them up. Otherwise, use order.revenue as approximation
+        let salesRevenue = 0;
+        if (order.itemRevenues) {
+          salesRevenue = Object.values(order.itemRevenues).reduce((sum: number, rev: number) => sum + rev, 0);
+          // Sales revenue should be before commission, so we need to reverse the calculation
+          // Butcher revenue = sales revenue * (1 - commission)
+          // So sales revenue = butcher revenue / (1 - commission)
+          // For now, we'll approximate: sales revenue ≈ butcher revenue * 1.15 (assuming ~13% commission)
+          salesRevenue = salesRevenue * 1.15; // Approximate sales revenue
+        } else if (order.revenue) {
+          // If no itemRevenues, estimate sales revenue from butcher revenue
+          salesRevenue = order.revenue * 1.15; // Approximate
+        }
+        
+        // Butcher Revenue: This is what the butcher gets (after commission)
+        const butcherRevenue = order.revenue || 0;
+        
+        // Margin: Sales Revenue - Butcher Revenue
+        const margin = salesRevenue - butcherRevenue;
+        
+        return {
+          orderId: order.id,
+          butcherId: order.butcherId || '',
+          butcherName: order.butcherName || order.butcherId || '',
+          orderDate: orderDateStr,
+          items,
+          quantity: quantities,
+          size: sizes,
+          cutType: cutTypes,
+          preparingWeight: preparingWeights,
+          completionTime,
+          startTime,
+          status: order.status,
+          salesRevenue,
+          butcherRevenue,
+          margin
+        };
+      });
+
+      setSalesData(calculatedSalesData);
+      
+      // Calculate butcher summary
+      const butcherMap = new Map<string, ButcherSalesSummary>();
+      
+      calculatedSalesData.forEach(sale => {
+        if (!butcherMap.has(sale.butcherId)) {
+          butcherMap.set(sale.butcherId, {
+            butcherId: sale.butcherId,
+            butcherName: sale.butcherName,
+            totalSales: 0,
+            totalRevenue: 0,
+            totalMargin: 0,
+            orderCount: 0
+          });
+        }
+        
+        const summary = butcherMap.get(sale.butcherId)!;
+        summary.totalSales += sale.salesRevenue;
+        summary.totalRevenue += sale.butcherRevenue;
+        summary.totalMargin += sale.margin;
+        summary.orderCount += 1;
+      });
+      
+      setButcherSummary(Array.from(butcherMap.values()));
+      
+    } catch (error: any) {
+      setError(error.message || 'Try again later');
+      setSalesData([]);
+      setButcherSummary([]);
+      setWeeklyTargets([]);
     }
-  };
+  }, [allOrders, selectedMonth, selectedYear]);
+
+  // Calculate weekly targets from sales data
+  const calculateWeeklyTargets = useCallback((salesData: SalesData[]) => {
+    if (!monthlyTarget) {
+      // If no target set, create empty weekly targets
+      setWeeklyTargets([
+        { week: 1, target: 0, achieved: 0, percentage: 0, status: 'pending' },
+        { week: 2, target: 0, achieved: 0, percentage: 0, status: 'pending' },
+        { week: 3, target: 0, achieved: 0, percentage: 0, status: 'pending' },
+        { week: 4, target: 0, achieved: 0, percentage: 0, status: 'pending' }
+      ]);
+      return;
+    }
+    
+    const weeklyTarget = monthlyTarget.totalTarget / 4;
+    const weeklyAchieved: { [week: number]: number } = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    
+    // Calculate achieved sales per week
+    salesData.forEach(sale => {
+      const orderDate = new Date(sale.orderDate.split('/').reverse().join('-'));
+      const week = Math.ceil(orderDate.getDate() / 7);
+      const weekNum = Math.min(week, 4); // Cap at week 4
+      weeklyAchieved[weekNum] += sale.salesRevenue;
+    });
+    
+    // Create weekly targets
+    const weeklyTargetsData: WeeklyTarget[] = [1, 2, 3, 4].map(week => {
+      const achieved = weeklyAchieved[week];
+      const percentage = weeklyTarget > 0 ? (achieved / weeklyTarget) * 100 : 0;
+      const status: 'pending' | 'achieved' | 'missed' = 
+        percentage >= 100 ? 'achieved' : 
+        percentage > 0 ? 'missed' : 
+        'pending';
+      
+      return {
+        week,
+        target: weeklyTarget,
+        achieved,
+        percentage,
+        status
+      };
+    });
+    
+    setWeeklyTargets(weeklyTargetsData);
+  }, [monthlyTarget]);
+
+  // Calculate sales data when orders or month/year changes
+  useEffect(() => {
+    calculateSalesDataFromOrders();
+  }, [calculateSalesDataFromOrders]);
+
+  // Calculate weekly targets when sales data or monthly target changes
+  useEffect(() => {
+    if (salesData.length > 0 || monthlyTarget) {
+      calculateWeeklyTargets(salesData);
+    }
+  }, [salesData, monthlyTarget, calculateWeeklyTargets]);
+
+  // Load monthly target when month/year changes
+  useEffect(() => {
+    loadMonthlyTarget();
+  }, [selectedMonth, selectedYear, loadMonthlyTarget]);
+
+  // Handle refresh button click
+  const handleRefresh = useCallback(async () => {
+    // Refresh orders from parent if available
+    if (onRefresh) {
+      setIsLoading(true);
+      try {
+        await onRefresh();
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    // Also refresh monthly target
+    await loadMonthlyTarget();
+  }, [onRefresh, loadMonthlyTarget]);
 
   const saveMonthlyTarget = async () => {
     if (!targetInput || parseFloat(targetInput) <= 0) {
@@ -193,7 +429,6 @@ const DAMAnalysis: React.FC = () => {
         throw new Error('Failed to save target');
       }
     } catch (error) {
-      console.error('Error saving monthly target:', error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -444,75 +679,127 @@ const DAMAnalysis: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
+        <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+          <div className="flex flex-col gap-4">
+            {/* Title Section */}
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40">
                 <BarChart3 className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
-              <div>
+              <div className="flex-1">
                 <CardTitle className="text-xl">D.A.M Analysis</CardTitle>
                 <p className="text-sm text-muted-foreground">
                   Daily, Weekly & Monthly Sales Target Tracking
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="month-select">Month:</Label>
-                <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {months.map((month) => (
-                      <SelectItem key={month.value} value={month.value.toString()}>
-                        {month.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {/* Controls Section */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="month-select" className="text-sm whitespace-nowrap">Month:</Label>
+                  <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {months.map((month) => (
+                        <SelectItem key={month.value} value={month.value.toString()}>
+                          {month.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="year-select" className="text-sm whitespace-nowrap">Year:</Label>
+                  <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {years.map((year) => (
+                        <SelectItem key={year} value={year.toString()}>
+                          {year}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="year-select">Year:</Label>
-                <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
-                  <SelectTrigger className="w-24">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {years.map((year) => (
-                      <SelectItem key={year} value={year.toString()}>
-                        {year}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <Button
+                variant="outline"
+                onClick={handleRefresh}
+                disabled={isLoading || externalIsLoading}
+                className="flex items-center gap-2 w-full sm:w-auto"
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading || externalIsLoading ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </Button>
             </div>
           </div>
         </CardHeader>
       </Card>
 
-      <Tabs defaultValue="targets" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="targets">Targets</TabsTrigger>
-          <TabsTrigger value="weekly">Weekly Progress</TabsTrigger>
-          <TabsTrigger value="butchers">Butcher Analysis</TabsTrigger>
-          <TabsTrigger value="margin">Margin Analysis</TabsTrigger>
-          <TabsTrigger value="insights">Performance Insights</TabsTrigger>
-          <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
+      {/* Error Display */}
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              <span>{error}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Tabs defaultValue="targets" className="space-y-4 sm:space-y-6">
+        <TabsList 
+          ref={tabsListRef}
+          className="w-full overflow-x-auto flex sm:grid sm:grid-cols-6 gap-1 sm:gap-2 p-1 sm:p-1 h-auto sm:h-10 px-0 sm:px-1 scrollbar-hide justify-start"
+          style={{ scrollBehavior: 'smooth' }}
+        >
+          <TabsTrigger value="targets" className="flex items-center gap-2 whitespace-nowrap pl-4 pr-3 sm:px-4 flex-shrink-0 min-w-fit">
+            <Target className="h-4 w-4 flex-shrink-0" />
+            <span>Targets</span>
+          </TabsTrigger>
+          <TabsTrigger value="weekly" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+            <Calendar className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline">Weekly Progress</span>
+            <span className="sm:hidden">Weekly</span>
+          </TabsTrigger>
+          <TabsTrigger value="butchers" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+            <Users className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline">Butcher Analysis</span>
+            <span className="sm:hidden">Butchers</span>
+          </TabsTrigger>
+          <TabsTrigger value="margin" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+            <DollarSign className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline">Margin Analysis</span>
+            <span className="sm:hidden">$ Margin</span>
+          </TabsTrigger>
+          <TabsTrigger value="insights" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+            <Lightbulb className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline">Performance Insights</span>
+            <span className="sm:hidden">Insights</span>
+          </TabsTrigger>
+          <TabsTrigger value="recommendations" className="flex items-center gap-2 whitespace-nowrap pl-3 pr-4 sm:px-4 flex-shrink-0 min-w-fit">
+            <TrendingUp className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline">Recommendations</span>
+            <span className="sm:hidden">Tips</span>
+          </TabsTrigger>
         </TabsList>
 
         {/* Targets Tab */}
         <TabsContent value="targets" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                 <Target className="h-5 w-5" />
                 Monthly Target Setting
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-4 sm:px-6 pb-4 sm:pb-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="target-input">Monthly Target (₹)</Label>
@@ -536,16 +823,36 @@ const DAMAnalysis: React.FC = () => {
                 <div className="flex items-end">
                   <Button 
                     variant="outline" 
-                    onClick={loadMonthlyTarget}
+                    onClick={handleRefresh}
                     disabled={isLoading}
-                    className="w-full"
+                    className="w-full flex items-center gap-2"
                   >
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                     {isLoading ? 'Loading...' : 'Refresh'}
                   </Button>
                 </div>
               </div>
 
-              {monthlyTarget && (
+              {isLoading && !monthlyTarget ? (
+                <div className="mt-6 p-4 bg-muted rounded-lg space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Skeleton className="h-6 w-48" />
+                    <Skeleton className="h-6 w-24" />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-4 w-40" />
+                    </div>
+                    <Skeleton className="h-3 w-full" />
+                    <div className="flex justify-between">
+                      <Skeleton className="h-4 w-8" />
+                      <Skeleton className="h-4 w-12" />
+                      <Skeleton className="h-4 w-8" />
+                    </div>
+                  </div>
+                </div>
+              ) : monthlyTarget && (
                 <div className="mt-6 p-4 bg-muted rounded-lg">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-semibold">
@@ -583,7 +890,37 @@ const DAMAnalysis: React.FC = () => {
 
         {/* Weekly Progress Tab */}
         <TabsContent value="weekly" className="space-y-6">
-          {(monthlyTarget || weeklyTargets.length > 0) && (
+          {isLoading && weeklyTargets.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Card key={i}>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <Skeleton className="h-5 w-20" />
+                      <Skeleton className="h-4 w-4 rounded-full" />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-12" />
+                        <Skeleton className="h-4 w-20" />
+                      </div>
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-16" />
+                        <Skeleton className="h-4 w-20" />
+                      </div>
+                    </div>
+                    <Skeleton className="h-2 w-full" />
+                    <div className="flex items-center justify-between">
+                      <Skeleton className="h-5 w-16" />
+                      <Skeleton className="h-4 w-12" />
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (monthlyTarget || weeklyTargets.length > 0) && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {(weeklyTargets.length > 0 ? weeklyTargets : monthlyTarget?.weeklyTargets || []).map((week) => (
                 <Card key={week.week}>
@@ -624,7 +961,39 @@ const DAMAnalysis: React.FC = () => {
 
         {/* Butcher Analysis Tab */}
         <TabsContent value="butchers" className="space-y-6">
-          {butcherSummary.length === 0 && monthlyTarget ? (
+          {isLoading && butcherSummary.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Card key={i}>
+                  <CardHeader className="pb-3">
+                    <Skeleton className="h-5 w-32" />
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-20" />
+                        <Skeleton className="h-4 w-24" />
+                      </div>
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-16" />
+                        <Skeleton className="h-4 w-12" />
+                      </div>
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-20" />
+                        <Skeleton className="h-4 w-24" />
+                      </div>
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-24" />
+                        <Skeleton className="h-4 w-20" />
+                      </div>
+                    </div>
+                    <Skeleton className="h-2 w-full" />
+                    <Skeleton className="h-4 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : butcherSummary.length === 0 && monthlyTarget ? (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">

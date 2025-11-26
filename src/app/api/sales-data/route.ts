@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveSalesDataToSheetSimple } from '@/lib/salesSheets';
+import { saveSalesDataToSheet } from '@/lib/salesSheets';
 
 export async function POST(request: NextRequest) {
   
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await saveSalesDataToSheetSimple(orderId, butcherId, orderData);
+    await saveSalesDataToSheet(orderId, butcherId, orderData);
     
     return NextResponse.json({ success: true, message: 'Sales data saved successfully' });
   } catch (error) {

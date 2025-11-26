@@ -14,9 +14,6 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { format } from "date-fns"
 import { useState, useEffect, useCallback } from "react"
-import { useOrderPolling } from "../../../hooks/useOrderPolling"
-import { useClientCache } from "../../../hooks/useClientCache"
-import { getCommissionRate } from "../../../lib/rates"
 
 // Helper function to extract order number from full order ID for display
 const getDisplayOrderId = (orderId: string): string => {
@@ -33,222 +30,268 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
+// Helper function to get IST date string (DD/MM/YYYY)
+const getISTDateString = (date: Date): string => {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+// Helper function to parse DD/MM/YYYY to Date
+const parseISTDate = (dateStr: string): Date | null => {
+  try {
+    const [day, month, year] = dateStr.split('/').map(Number);
+    if (day && month && year) {
+      return new Date(year, month - 1, day, 12, 0, 0, 0);
+    }
+  } catch (e) {
+    // Silently handle date parsing errors
+  }
+  return null;
+};
+
+// Helper function to get Monday of current week
+const getMondayOfWeek = (date: Date): Date => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+  return new Date(d.setDate(diff));
+};
+
+// Helper function to get Sunday of current week
+const getSundayOfWeek = (date: Date): Date => {
+  const monday = getMondayOfWeek(date);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return sunday;
+};
+
+// Helper function to get first day of current month
+const getFirstDayOfMonth = (date: Date): Date => {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+// Helper function to get last day of current month
+const getLastDayOfMonth = (date: Date): Date => {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+};
+
 export default function AnalyticsPage() {
   const { butcher, admin, isAdmin } = useAuth();
   const { toast } = useToast();
-  const { clear: clearCache } = useClientCache();
-  const [showWeeklyReport, setShowWeeklyReport] = useState(false);
-  const [showMonthlyReport, setShowMonthlyReport] = useState(false);
-  const [allOrders, setAllOrders] = useState<Order[]>([]);
-  const [isLoadingAll, setIsLoadingAll] = useState(false);
-  
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Use slower polling for analytics to avoid quota limits
-  const { orders, isLoading, error, refetch } = useOrderPolling({
-    butcherId: butcher?.id || '',
-    pollingInterval: 30000, // 30-second interval for analytics (2 requests/minute)
-    enabled: !!butcher
-  });
+  // Fetch all orders from sheet with pagination
+  const fetchOrdersFromSheet = useCallback(async (butcherId: string) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const token = localStorage.getItem('jwt_token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      let allOrdersData: Order[] = [];
+      let page = 1;
+      let hasMore = true;
+
+      // Fetch all pages sequentially
+      while (hasMore) {
+        const response = await fetch(`/api/analytics/${butcherId}?page=${page}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Failed to fetch analytics data');
+        }
+
+        const data = await response.json();
+        allOrdersData = [...allOrdersData, ...data.orders];
+        
+        hasMore = data.pagination.hasMore;
+        page++;
+      }
+
+      setOrders(allOrdersData);
+    } catch (err: any) {
+      setError(err.message || 'Try again later');
+      toast({
+        variant: "destructive",
+        title: "Failed to load analytics data",
+        description: err.message || "Try again later"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]);
 
   // Fetch all orders for admin users
   const fetchAllOrders = useCallback(async () => {
     if (!isAdmin) return;
     
-    setIsLoadingAll(true);
+    setIsLoading(true);
+    setError(null);
+    
     try {
+      const token = localStorage.getItem('jwt_token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
       const butcherIds = ['usaj', 'usaj_mutton', 'pkd', 'kak', 'ka_sons', 'alif'];
       const allOrdersData: Order[] = [];
       
       for (const butcherId of butcherIds) {
         try {
-          const response = await fetch(`/api/orders/${butcherId}`);
-          if (response.ok) {
-            const data = await response.json();
-            allOrdersData.push(...data.orders);
+          let page = 1;
+          let hasMore = true;
+
+          while (hasMore) {
+            const response = await fetch(`/api/analytics/${butcherId}?page=${page}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              allOrdersData.push(...data.orders);
+              hasMore = data.pagination.hasMore;
+              page++;
+            } else {
+              hasMore = false;
+            }
           }
         } catch (error) {
-          console.error(`Error fetching orders for ${butcherId}:`, error);
+          // Silently handle individual butcher fetch errors
         }
       }
       
-      setAllOrders(allOrdersData);
-    } catch (error) {
-      console.error('Error fetching all orders:', error);
+      setOrders(allOrdersData);
+    } catch (error: any) {
+      setError(error.message || 'Try again later');
+      toast({
+        variant: "destructive",
+        title: "Failed to load analytics data",
+        description: error.message || "Try again later"
+      });
     } finally {
-      setIsLoadingAll(false);
+      setIsLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, toast]);
 
-  // Enhanced refetch that clears cache
-  const forceRefresh = useCallback(async () => {
+  // Refresh button handler
+  const handleRefresh = useCallback(async () => {
     if (isAdmin) {
       await fetchAllOrders();
     } else if (butcher?.id) {
-      // Clear all possible cache keys
-      clearCache(`orders_${butcher.id}`);
-      clearCache(`orders_${butcher.id}_*`);
-      // Add a small delay to ensure cache is cleared
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await refetch();
+      await fetchOrdersFromSheet(butcher.id);
     }
-  }, [isAdmin, butcher?.id, clearCache, refetch, fetchAllOrders]);
+  }, [isAdmin, butcher?.id, fetchAllOrders, fetchOrdersFromSheet]);
 
-  // Load all orders for admin on mount
+  // Load orders on mount
   useEffect(() => {
     if (isAdmin) {
       fetchAllOrders();
+    } else if (butcher?.id) {
+      fetchOrdersFromSheet(butcher.id);
     }
-  }, [isAdmin, fetchAllOrders]);
+  }, [isAdmin, butcher?.id, fetchAllOrders, fetchOrdersFromSheet]);
 
   if (!butcher && !isAdmin) return null;
 
-  // Get today's date for filtering
+  // Get today's date in IST format for filtering
   const today = new Date();
-  const todayString = today.toDateString();
+  const todayIST = getISTDateString(today);
   
-  // Use appropriate orders based on user type
-  const currentOrders = isAdmin ? allOrders : orders;
-  const currentIsLoading = isAdmin ? isLoadingAll : isLoading;
-  
-  // Filter orders by date first, then by status
-  const todayOrders = currentOrders.filter(order => {
-    const orderDate = new Date(order.orderTime);
-    const orderDateString = orderDate.toDateString();
-    const isToday = orderDateString === todayString;
-    
-    // Debug logging for date filtering
-    if (currentOrders.length > 0 && currentOrders.indexOf(order) < 3) { // Log first 3 orders for debugging
-      console.log(`Analytics date filter: Order ${order.id}, orderDate: ${orderDateString}, today: ${todayString}, isToday: ${isToday}`);
-    }
-    
-    return isToday;
+  // Filter orders by date from sheet (Order Date column is in DD/MM/YYYY format)
+  const todayOrders = orders.filter(order => {
+    // Parse order date from orderTime (which comes from sheet)
+    const orderDateStr = getISTDateString(new Date(order.orderTime));
+    return orderDateStr === todayIST;
   });
   
-  const completedOrders = todayOrders.filter(o => ['completed', 'prepared', 'ready to pick up'].includes(o.status));
-  const declinedOrders = todayOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
-  
-  // Debug: Log all orders and their statuses
-  console.log('Analytics: All today orders with statuses:', todayOrders.map(order => ({
-    id: order.id,
-    status: order.status,
-    hasRevenue: !!order.revenue,
-    revenue: order.revenue
-  })));
-  
-  console.log('Analytics: Filtered completed orders:', completedOrders.map(order => ({
-    id: order.id,
-    status: order.status,
-    revenue: order.revenue
-  })));
-
-  // Force refresh on component mount to get latest data
-  useEffect(() => {
-    if (butcher?.id) {
-      forceRefresh();
+  // ✅ FIX: Remove duplicates by order.id to prevent duplicate key errors
+  const uniqueTodayOrders = new Map<string, Order>();
+  todayOrders.forEach(order => {
+    if (!uniqueTodayOrders.has(order.id)) {
+      uniqueTodayOrders.set(order.id, order);
     }
-  }, [butcher?.id, forceRefresh]);
+  });
+  const deduplicatedTodayOrders = Array.from(uniqueTodayOrders.values());
 
-  // Debug: Log order data when it changes
-  useEffect(() => {
-    if (orders.length > 0) {
-      console.log('Analytics: Orders data updated:', {
-        totalOrders: orders.length,
-        completedOrders: completedOrders.length,
-        sampleOrder: completedOrders[0] ? {
-          id: completedOrders[0].id,
-          revenue: completedOrders[0].revenue,
-          pickedWeight: completedOrders[0].pickedWeight,
-          status: completedOrders[0].status
-        } : null
-      });
-      
-      // Log all completed orders with their revenue
-      console.log('Analytics: All completed orders revenue details:');
-      completedOrders.forEach((order, index) => {
-        console.log(`Order ${index + 1}:`, {
-          id: order.id,
-          revenue: order.revenue,
-          itemRevenues: order.itemRevenues,
-          pickedWeight: order.pickedWeight,
-          status: order.status,
-          items: order.items.map(item => ({ name: item.name, quantity: item.quantity }))
-        });
-      });
+  // Weekly: Monday to Sunday of current week
+  const monday = getMondayOfWeek(today);
+  const sunday = getSundayOfWeek(today);
+  const weeklyOrdersRaw = orders.filter(order => {
+    const orderDate = new Date(order.orderTime);
+    return orderDate >= monday && orderDate <= sunday;
+  });
+  // ✅ FIX: Remove duplicates
+  const uniqueWeeklyOrders = new Map<string, Order>();
+  weeklyOrdersRaw.forEach(order => {
+    if (!uniqueWeeklyOrders.has(order.id)) {
+      uniqueWeeklyOrders.set(order.id, order);
     }
-  }, [orders, completedOrders]);
+  });
+  const weeklyOrders = Array.from(uniqueWeeklyOrders.values());
 
-  // Show error toast if there's an issue
-  useEffect(() => {
-    if (error) {
-      toast({ 
-        variant: "destructive", 
-        title: "Failed to load analytics data", 
-        description: error 
-      });
+  // Monthly: 1st to last day of current month
+  const monthStart = getFirstDayOfMonth(today);
+  const monthEnd = getLastDayOfMonth(today);
+  const monthlyOrdersRaw = orders.filter(order => {
+    const orderDate = new Date(order.orderTime);
+    return orderDate >= monthStart && orderDate <= monthEnd;
+  });
+  // ✅ FIX: Remove duplicates
+  const uniqueMonthlyOrders = new Map<string, Order>();
+  monthlyOrdersRaw.forEach(order => {
+    if (!uniqueMonthlyOrders.has(order.id)) {
+      uniqueMonthlyOrders.set(order.id, order);
     }
-  }, [error, toast]);
+  });
+  const monthlyOrders = Array.from(uniqueMonthlyOrders.values());
   
-  // Calculate revenue based on actual stored revenue or item revenues
-  const calculateOrderRevenue = (order: Order): number => {
+  // Filter orders by status (use deduplicated orders)
+  const completedOrders = deduplicatedTodayOrders.filter(o => ['completed', 'prepared', 'ready to pick up'].includes(o.status));
+  const declinedOrders = deduplicatedTodayOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
+  
+  // Calculate revenue based on actual stored revenue or item revenues from sheet
+  const calculateOrderRevenueAnalytics = (order: Order): number => {
+    // Use item revenues if available (sum of all item revenues)
+    if (order.itemRevenues && Object.keys(order.itemRevenues).length > 0) {
+      return Object.values(order.itemRevenues).reduce((sum, revenue) => sum + revenue, 0);
+    }
     
-    // Use stored revenue if available
+    // Otherwise, use stored revenue if available
     if (order.revenue) {
       return order.revenue;
     }
     
-    // Use item revenues if available (sum of all item revenues)
-    if (order.itemRevenues) {
-      const itemRevenueSum = Object.values(order.itemRevenues).reduce((sum, revenue) => sum + revenue, 0);
-      console.log(`✅ Using item revenues sum: ₹${itemRevenueSum}`, order.itemRevenues);
-      return itemRevenueSum;
-    }
-    
-    console.log(`⚠️ No stored revenue found, using fallback calculation`);
-    
-    // Fallback: calculate based on preparing weight with commission
-    const preparingWeight = order.pickedWeight || 0;
-    if (preparingWeight > 0) {
-      // Get commission rate for default category (using default rates for fallback calculations)
-      const commission = getCommissionRate(butcher.id, 'default');
-      const defaultPricePerKg = 450; // Default purchase price
-      const totalValue = preparingWeight * defaultPricePerKg;
-      const fallbackRevenue = totalValue - (totalValue * commission);
-      console.log(`⚠️ Fallback calculation: ${preparingWeight}kg × ₹${defaultPricePerKg} - ${commission*100}% = ₹${fallbackRevenue}`);
-      return fallbackRevenue;
-    }
-    
-    // Final fallback: estimate based on item quantity
-    const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
-    const finalFallback = totalQuantity * 450; // Default rate
-    console.log(`⚠️ Final fallback: ${totalQuantity} × ₹450 = ₹${finalFallback}`);
-    console.log(`==========================================\n`);
-    return finalFallback;
+    // If neither exists, return 0
+    return 0;
   };
   
   // Calculate total revenue including declined orders (negative revenue)
-  const completedRevenue = completedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0);
+  const completedRevenue = completedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const declinedRevenue = declinedOrders.reduce((acc, order) => {
     // For declined orders, show negative revenue (loss) but don't add to total
-    const estimatedRevenue = calculateOrderRevenue(order);
+    const estimatedRevenue = calculateOrderRevenueAnalytics(order);
     return acc - estimatedRevenue; // Negative revenue for declined orders
   }, 0);
   
   // Total revenue only includes completed orders, declined orders are shown separately
   const totalRevenue = completedRevenue;
   
-  // Debug: Log revenue calculation details
-  console.log('Analytics: Revenue calculation summary:', {
-    completedOrdersCount: completedOrders.length,
-    completedRevenue: completedRevenue,
-    declinedOrdersCount: declinedOrders.length,
-    declinedRevenue: declinedRevenue,
-    totalRevenue: totalRevenue,
-    revenueBreakdown: completedOrders.map(order => ({
-      id: order.id,
-      revenue: order.revenue,
-      calculatedRevenue: calculateOrderRevenue(order)
-    }))
-  });
   const totalOrders = completedOrders.length + declinedOrders.length;
   
   // Calculate total weight sold from preparing weights
@@ -268,62 +311,35 @@ export default function AnalyticsPage() {
   // Calculate average only for orders that actually have preparation times
   const avgPrepTimeInMinutes = ordersWithPrepTime.length > 0 ? (totalPrepTime / ordersWithPrepTime.length / (1000 * 60)) : 0;
   
-  // Debug: Log preparation time calculation details
-  console.log('Analytics: Preparation time calculation:', {
-    completedOrdersCount: completedOrders.length,
-    ordersWithPrepTimeCount: ordersWithPrepTime.length,
-    totalPrepTimeMs: totalPrepTime,
-    avgPrepTimeMinutes: avgPrepTimeInMinutes,
-    ordersWithPrepTime: ordersWithPrepTime.map(order => ({
-      id: order.id,
-      startTime: order.preparationStartTime,
-      endTime: order.preparationEndTime,
-      duration: order.preparationEndTime && order.preparationStartTime ? 
-        (order.preparationEndTime.getTime() - order.preparationStartTime.getTime()) / (1000 * 60) : 0
-    }))
-  });
   
-  // Use the already filtered todayOrders for daily analytics
-  const dailyOrders = todayOrders;
-  const todayDeclinedOrders = declinedOrders;
-
   // Weekly report calculations
-  const getWeekDateRange = () => {
-    const today = new Date();
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - 6); // 7 days including today
-    return { weekStart, weekEnd: today };
-  };
-
-  const { weekStart, weekEnd } = getWeekDateRange();
-  const weeklyOrders = orders.filter(o => {
-    const orderDate = new Date(o.orderTime);
-    return orderDate >= weekStart && orderDate <= weekEnd;
-  });
-
   const weeklyCompletedOrders = weeklyOrders.filter(o => ['completed', 'prepared'].includes(o.status));
   const weeklyDeclinedOrders = weeklyOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
-  const weeklyRevenue = weeklyCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0);
+  const weeklyRevenue = weeklyCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const weeklyWeightSold = weeklyCompletedOrders.reduce((acc, order) => {
     return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
   }, 0);
 
-  // Daily breakdown for the week
+  // Daily breakdown for the week (Monday to Sunday)
   const dailyBreakdown = [];
-  for (let i = 6; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const dateString = date.toDateString();
-    const dayOrders = orders.filter(o => new Date(o.orderTime).toDateString() === dateString);
+  const currentMonday = getMondayOfWeek(today);
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(currentMonday);
+    date.setDate(currentMonday.getDate() + i);
+    const dateIST = getISTDateString(date);
+    const dayOrders = orders.filter(o => {
+      const orderDateStr = getISTDateString(new Date(o.orderTime));
+      return orderDateStr === dateIST;
+    });
     const dayCompletedOrders = dayOrders.filter(o => ['completed', 'prepared'].includes(o.status));
-    const dayRevenue = dayCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0);
+    const dayRevenue = dayCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
     const dayWeight = dayCompletedOrders.reduce((acc, order) => {
       return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
     }, 0);
 
     dailyBreakdown.push({
       date: format(date, 'MMM dd'),
-      fullDate: dateString,
+      fullDate: dateIST,
       orders: dayOrders.length,
       completedOrders: dayCompletedOrders.length,
       revenue: dayRevenue,
@@ -332,22 +348,9 @@ export default function AnalyticsPage() {
   }
 
   // Monthly report calculations
-  const getMonthDateRange = () => {
-    const today = new Date();
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    return { monthStart, monthEnd };
-  };
-
-  const { monthStart, monthEnd } = getMonthDateRange();
-  const monthlyOrders = orders.filter(o => {
-    const orderDate = new Date(o.orderTime);
-    return orderDate >= monthStart && orderDate <= monthEnd;
-  });
-
   const monthlyCompletedOrders = monthlyOrders.filter(o => ['completed', 'prepared'].includes(o.status));
   const monthlyDeclinedOrders = monthlyOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
-  const monthlyRevenue = monthlyCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0);
+  const monthlyRevenue = monthlyCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const monthlyWeightSold = monthlyCompletedOrders.reduce((acc, order) => {
     return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
   }, 0);
@@ -355,6 +358,7 @@ export default function AnalyticsPage() {
   // Weekly breakdown for the month
   const weeklyBreakdown = [];
   const currentDate = new Date(monthStart);
+  let weekNumber = 1;
   while (currentDate <= monthEnd) {
     const weekStart = new Date(currentDate);
     const weekEnd = new Date(currentDate);
@@ -371,15 +375,15 @@ export default function AnalyticsPage() {
     });
     
     const weekCompletedOrders = weekOrders.filter(o => ['completed', 'prepared'].includes(o.status));
-    const weekRevenue = weekCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0);
+    const weekRevenue = weekCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
     const weekWeight = weekCompletedOrders.reduce((acc, order) => {
       return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
     }, 0);
 
     weeklyBreakdown.push({
-      week: `Week ${Math.ceil((currentDate.getDate()) / 7)}`,
+      week: `Week ${weekNumber}`,
       dateRange: `${format(weekStart, 'MMM dd')} - ${format(weekEnd, 'MMM dd')}`,
-      fullDate: weekStart.toDateString(),
+      fullDate: getISTDateString(weekStart),
       orders: weekOrders.length,
       completedOrders: weekCompletedOrders.length,
       revenue: weekRevenue,
@@ -388,17 +392,19 @@ export default function AnalyticsPage() {
 
     // Move to next week
     currentDate.setDate(currentDate.getDate() + 7);
+    weekNumber++;
   }
 
-  const chartData = dailyOrders.map(order => ({
-    id: order.id,
-    revenue: (order.status === 'rejected' || order.rejectionReason) ? -calculateOrderRevenue(order) : calculateOrderRevenue(order),
+  // ✅ FIX: Use deduplicated orders for chart data
+  const chartData = deduplicatedTodayOrders.map((order, index) => ({
+    id: `${order.id}-${index}`, // ✅ FIX: Add index to ensure unique keys
+    revenue: (order.status === 'rejected' || order.rejectionReason) ? -calculateOrderRevenueAnalytics(order) : calculateOrderRevenueAnalytics(order),
   }));
 
   // Calculate item-wise statistics for today only
   // completedOrders is already filtered to today's orders
   const itemStats = completedOrders.reduce((acc, order) => {
-    const orderRevenue = calculateOrderRevenue(order);
+    const orderRevenue = calculateOrderRevenueAnalytics(order);
     const orderWeight = order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0);
     
     order.items.forEach((item, index) => {
@@ -418,10 +424,8 @@ export default function AnalyticsPage() {
     return acc;
   }, {} as Record<string, { totalWeight: number; totalRevenue: number; count: number }>);
 
-  // Total weight sold today
-  const dailyWeightSold = completedOrders.reduce((acc, order) => {
-    return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
-  }, 0);
+  // Use totalWeightSold as dailyWeightSold (they're the same for today's orders)
+  const dailyWeightSold = totalWeightSold;
 
   const getStatusBadge = (order: Order) => {
     // If order has rejection reason, show the rejection message
@@ -437,7 +441,7 @@ export default function AnalyticsPage() {
       case 'prepared': return <Badge variant="secondary">Prepared</Badge>;
       default: return <Badge variant="outline">{order.status}</Badge>;
     }
-  }
+  };
 
   const getPrepTime = (order: Order) => {
     if (order.preparationEndTime && order.preparationStartTime) {
@@ -445,109 +449,107 @@ export default function AnalyticsPage() {
       return `${Math.floor(diff / (1000 * 60))}m ${Math.floor((diff / 1000) % 60)}s`;
     }
     return 'N/A';
-  }
+  };
 
   return (
-    <div className="space-y-6">
-      <Tabs defaultValue="analytics" className="w-full">
-        <TabsList className="grid w-full grid-cols-1">
-          <TabsTrigger value="analytics" className="flex items-center gap-2">
+    <div className="w-full max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-4 sm:py-6 lg:py-8 space-y-4 sm:space-y-6">
+      {/* ✅ FIX: Make analytics tabs responsive like admin tabs */}
+      <Tabs defaultValue="today" className="w-full">
+        <TabsList className="w-full max-w-full overflow-x-auto flex sm:grid sm:grid-cols-3 gap-1 sm:gap-2 p-1 sm:p-1 h-auto sm:h-10 px-1 sm:px-1">
+          <TabsTrigger value="today" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4">
+            <Calendar className="h-4 w-4" />
+            <span>Today</span>
+          </TabsTrigger>
+          <TabsTrigger value="weekly" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4">
+            <FileText className="h-4 w-4" />
+            <span>Weekly</span>
+          </TabsTrigger>
+          <TabsTrigger value="monthly" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4">
             <TrendingUp className="h-4 w-4" />
-            Analytics
+            <span>Monthly</span>
           </TabsTrigger>
         </TabsList>
         
-        <TabsContent value="analytics" className="space-y-6">
-        <div className="flex justify-between items-start">
+        {/* Today Tab */}
+        <TabsContent value="today" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+        {/* ✅ FIX: Responsive header matching order page */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold">Analytics Dashboard</h1>
-            {isAdmin && <p className="text-muted-foreground">Admin view - All butchers data</p>}
+            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Analytics Dashboard</h1>
+            {isAdmin && <p className="text-sm sm:text-base text-muted-foreground mt-1">Admin view - All butchers data</p>}
           </div>
-        <div className="flex items-center gap-4">
-          <Button 
-            variant={showWeeklyReport ? "default" : "outline"} 
-            size="sm" 
-            onClick={() => setShowWeeklyReport(!showWeeklyReport)}
-          >
-            <Calendar className="h-4 w-4" />
-            <span className="ml-2 hidden sm:inline">
-              {showWeeklyReport ? 'Hide Weekly Report' : 'Weekly Report'}
-            </span>
-          </Button>
-          <Button 
-            variant={showMonthlyReport ? "default" : "outline"} 
-            size="sm" 
-            onClick={() => setShowMonthlyReport(!showMonthlyReport)}
-          >
-            <Calendar className="h-4 w-4" />
-            <span className="ml-2 hidden sm:inline">
-              {showMonthlyReport ? 'Hide Monthly Report' : 'Monthly Report'}
-            </span>
-          </Button>
-          <Button variant="outline" size="sm" onClick={forceRefresh} disabled={currentIsLoading}>
-            <RefreshCw className={`h-4 w-4 ${currentIsLoading ? 'animate-spin' : ''}`} />
-            <span className="ml-2 hidden sm:inline">Refresh Data</span>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading} className="text-xs sm:text-sm">
+            <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh Data</span>
+            <span className="sm:hidden">Refresh</span>
           </Button>
           {error && (
-            <div className="flex items-center gap-2 text-destructive">
-              <AlertCircle className="h-4 w-4" />
-              <span className="text-sm">Data sync error</span>
+            <div className="flex items-center gap-2 text-destructive text-xs sm:text-sm">
+              <AlertCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+              <span>{error}</span>
             </div>
           )}
         </div>
       </div>
 
       {/* Daily Analytics Section */}
-      <div className="space-y-6">
-        <Card className="border-primary bg-primary/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-primary">
-              <TrendingUp className="h-5 w-5" />
-              Today's Performance ({format(new Date(), 'MMM dd, yyyy')})
+      <div className="space-y-4 sm:space-y-6">
+        <Card className="border-primary bg-primary/5 w-full max-w-full">
+          <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+            <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 text-primary text-base sm:text-lg md:text-xl">
+              <span className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+                <span>Today's Performance</span>
+              </span>
+              <span className="text-xs sm:text-sm text-muted-foreground">({format(new Date(), 'MMM dd')})</span>
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-xs sm:text-sm mt-1">
               Real-time overview of today's sales and operations
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-4">
+          <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+            <div className="grid gap-2 sm:gap-3 md:gap-4 grid-cols-2 md:grid-cols-4">
               <div className="text-center">
-                <div className="text-2xl font-bold text-primary">
+                <div className="text-xl sm:text-2xl font-bold text-primary">
                   ₹{totalRevenue.toLocaleString('en-IN')}
                 </div>
-                <p className="text-sm text-muted-foreground">Total Revenue</p>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Total Revenue</p>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-primary">
-                  {dailyOrders.length}
+                <div className="text-xl sm:text-2xl font-bold text-primary">
+                  {deduplicatedTodayOrders.length}
                 </div>
-                <p className="text-sm text-muted-foreground">Total Orders</p>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Total Orders</p>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-primary">
+                <div className="text-xl sm:text-2xl font-bold text-primary">
                   {completedOrders.length}
                 </div>
-                <p className="text-sm text-muted-foreground">Completed Orders</p>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Completed Orders</p>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-primary">
+                <div className="text-xl sm:text-2xl font-bold text-primary">
                   {dailyWeightSold.toFixed(2)} kg
                 </div>
-                <p className="text-sm text-muted-foreground">Total Weight Sold</p>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Total Weight Sold</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Today's Orders Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Today's Orders</CardTitle>
-            <CardDescription>A detailed list of all orders processed today.</CardDescription>
+        <Card className="w-full max-w-full">
+          <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+            <CardTitle className="text-base sm:text-lg md:text-xl">Today's Orders</CardTitle>
+            <CardDescription className="text-xs sm:text-sm mt-1">A detailed list of all orders processed today.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="max-h-96 overflow-y-auto border rounded-md">
-              <Table>
+          <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+            {/* ✅ FIX: Scrollable table container for mobile */}
+            <div className="w-full overflow-x-auto -mx-3 sm:-mx-4 lg:-mx-6">
+              <div className="min-w-[600px] px-3 sm:px-4 lg:px-6">
+                <div className="max-h-96 overflow-y-auto border rounded-md">
+                  <Table>
                 <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
                     <TableHead>Order ID</TableHead>
@@ -557,13 +559,13 @@ export default function AnalyticsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {dailyOrders.length > 0 ? dailyOrders.map(order => (
-                    <TableRow key={order.id}>
+                  {deduplicatedTodayOrders.length > 0 ? deduplicatedTodayOrders.map((order, index) => (
+                    <TableRow key={`${order.id}-${index}`}> {/* ✅ FIX: Use unique key with index */}
                       <TableCell className="font-medium">{getDisplayOrderId(order.id)}</TableCell>
                       <TableCell>{getStatusBadge(order)}</TableCell>
                       <TableCell>{getPrepTime(order)}</TableCell>
                       <TableCell className="text-right">
-                        ₹{calculateOrderRevenue(order).toLocaleString('en-IN')}
+                        ₹{calculateOrderRevenueAnalytics(order).toLocaleString('en-IN')}
                       </TableCell>
                     </TableRow>
                   )) : (
@@ -575,397 +577,435 @@ export default function AnalyticsPage() {
                   )}
                 </TableBody>
               </Table>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-2 sm:gap-3 md:gap-4 grid-cols-2 md:grid-cols-4">
+          <Card className="w-full max-w-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-3 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pt-6">
+              <CardTitle className="text-xs sm:text-sm font-medium">Total Revenue Today</CardTitle>
+              <IndianRupee className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
+            </CardHeader>
+            <CardContent className="px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-8 w-24 mb-2" />
+                  <Skeleton className="h-4 w-32" />
+                </>
+              ) : (
+                <>
+                  <div className="text-xl sm:text-2xl font-bold">₹{completedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0).toLocaleString('en-IN')}</div>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">From {completedOrders.length} completed orders today {declinedOrders.length > 0 && `(${declinedOrders.length} declined shown separately)`}</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="w-full max-w-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-3 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pt-6">
+              <CardTitle className="text-xs sm:text-sm font-medium">Total Orders Today</CardTitle>
+              <ShoppingCart className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
+            </CardHeader>
+            <CardContent className="px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-8 w-16 mb-2" />
+                  <Skeleton className="h-4 w-28" />
+                </>
+              ) : (
+                <>
+                  <div className="text-xl sm:text-2xl font-bold">{deduplicatedTodayOrders.length}</div>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">{completedOrders.length} completed today</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="w-full max-w-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-3 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pt-6">
+              <CardTitle className="text-xs sm:text-sm font-medium">Total Weight Sold Today</CardTitle>
+              <Weight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
+            </CardHeader>
+            <CardContent className="px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-8 w-20 mb-2" />
+                  <Skeleton className="h-4 w-24" />
+                </>
+              ) : (
+                <>
+                  <div className="text-xl sm:text-2xl font-bold">{dailyWeightSold.toFixed(2)} kg</div>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">Across all items today</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="w-full max-w-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-3 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pt-6">
+              <CardTitle className="text-xs sm:text-sm font-medium">Avg. Preparation Time</CardTitle>
+              <Timer className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
+            </CardHeader>
+            <CardContent className="px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-8 w-18 mb-2" />
+                  <Skeleton className="h-4 w-32" />
+                </>
+              ) : (
+                <>
+                  <div className="text-xl sm:text-2xl font-bold">{avgPrepTimeInMinutes.toFixed(1)} min</div>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">Across all completed orders</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Declined Orders Card - Show separately */}
+        {declinedOrders.length > 0 && (
+          <Card className="border-red-200 bg-red-50 dark:bg-red-950/20 w-full max-w-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-3 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pt-6">
+              <CardTitle className="text-xs sm:text-sm font-medium text-red-700 dark:text-red-300">Declined Orders Today</CardTitle>
+              <XCircle className="h-3 w-3 sm:h-4 sm:w-4 text-red-500 flex-shrink-0" />
+            </CardHeader>
+            <CardContent className="px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6">
+              <div className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">
+                -₹{declinedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0).toLocaleString('en-IN')}
+              </div>
+              <p className="text-[10px] sm:text-xs text-red-600 dark:text-red-400 mt-1">
+                Lost revenue from {declinedOrders.length} declined orders (not included in total)
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="grid gap-4">
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="text-base sm:text-lg md:text-xl">Today's Revenue by Order</CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1">A summary of revenue generated from each order today.</CardDescription>
+            </CardHeader>
+            <CardContent className="px-2 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              {/* ✅ FIX: Scrollable chart container */}
+              <div className="w-full overflow-x-auto -mx-2 sm:-mx-4 lg:-mx-6">
+                <div className="min-w-[400px] px-2 sm:px-4 lg:px-6">
+                  <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                    <BarChart accessibilityLayer data={chartData}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis
+                        dataKey="id"
+                        tickLine={false}
+                        tickMargin={10}
+                        axisLine={false}
+                        tickFormatter={(value) => value.slice(-3)}
+                      />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={10}
+                        tickFormatter={(value) => `₹${value}`}
+                      />
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent indicator="dot" />}
+                      />
+                      <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
+                    </BarChart>
+                  </ChartContainer>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Item-wise Statistics */}
+        <Card className="w-full max-w-full">
+          <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+            <CardTitle className="text-base sm:text-lg md:text-xl">Item-wise Sales Today</CardTitle>
+            <CardDescription className="text-xs sm:text-sm mt-1">Weight sold and revenue generated for each item today.</CardDescription>
+          </CardHeader>
+          <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+            {/* ✅ FIX: Scrollable table container for mobile */}
+            <div className="w-full overflow-x-auto -mx-3 sm:-mx-4 lg:-mx-6">
+              <div className="min-w-[600px] px-3 sm:px-4 lg:px-6">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item Name</TableHead>
+                      <TableHead>Total Weight Sold</TableHead>
+                      <TableHead>Orders</TableHead>
+                      <TableHead className="text-right">Revenue</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(itemStats).length > 0 ? Object.entries(itemStats).map(([itemName, stats]) => (
+                      <TableRow key={itemName}>
+                        <TableCell className="font-medium">{itemName}</TableCell>
+                        <TableCell>{stats.totalWeight.toFixed(2)} kg</TableCell>
+                        <TableCell>{stats.count}</TableCell>
+                        <TableCell className="text-right">₹{stats.totalRevenue.toFixed(2)}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={4} className="h-24 text-center">
+                          No sales data available today.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
 
-      {/* Weekly Report Section */}
-      {showWeeklyReport && (
-        <div className="space-y-6">
-          <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                <FileText className="h-5 w-5" />
-                Weekly Report ({format(weekStart, 'MMM dd')} - {format(weekEnd, 'MMM dd, yyyy')})
+        {/* Weekly Tab */}
+        <TabsContent value="weekly" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <div className="space-y-6">
+          <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 text-blue-700 dark:text-blue-300 text-base sm:text-lg md:text-xl">
+                <span className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+                  <span>Weekly Report</span>
+                </span>
+                <span className="text-xs sm:text-sm text-blue-600 dark:text-blue-400">({format(monday, 'MMM dd')} - {format(sunday, 'MMM dd')})</span>
               </CardTitle>
-              <CardDescription className="text-blue-600 dark:text-blue-400">
+              <CardDescription className="text-blue-600 dark:text-blue-400 text-xs sm:text-sm mt-1">
                 Summary of the past 7 days performance
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-4">
+            <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              <div className="grid gap-2 sm:gap-3 md:gap-4 grid-cols-2 md:grid-cols-4">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                  <div className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300">
                     ₹{weeklyRevenue.toLocaleString('en-IN')}
                   </div>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">Total Revenue</p>
+                  <p className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 mt-1">Total Revenue</p>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                  <div className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300">
                     {weeklyOrders.length}
                   </div>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">Total Orders</p>
+                  <p className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 mt-1">Total Orders</p>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                  <div className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300">
                     {weeklyCompletedOrders.length}
                   </div>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">Completed Orders</p>
+                  <p className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 mt-1">Completed Orders</p>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                  <div className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300">
                     {weeklyWeightSold.toFixed(2)} kg
                   </div>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">Total Weight Sold</p>
+                  <p className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 mt-1">Total Weight Sold</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Daily Breakdown Chart */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Daily Performance Breakdown</CardTitle>
-              <CardDescription>Revenue and orders for each day of the week</CardDescription>
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="text-base sm:text-lg md:text-xl">Daily Performance Breakdown</CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1">Revenue and orders for each day of the week</CardDescription>
             </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                <BarChart accessibilityLayer data={dailyBreakdown}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tickLine={false}
-                    tickMargin={10}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={10}
-                    tickFormatter={(value) => `₹${value}`}
-                  />
-                  <ChartTooltip
-                    cursor={false}
-                    content={<ChartTooltipContent indicator="dot" />}
-                  />
-                  <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
-                </BarChart>
-              </ChartContainer>
+            <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              {/* ✅ FIX: Scrollable chart container */}
+              <div className="w-full overflow-x-auto -mx-2 sm:-mx-4 lg:-mx-6">
+                <div className="min-w-[400px] px-2 sm:px-4 lg:px-6">
+                  <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                    <BarChart accessibilityLayer data={dailyBreakdown}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickLine={false}
+                        tickMargin={10}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={10}
+                        tickFormatter={(value) => `₹${value}`}
+                      />
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent indicator="dot" />}
+                      />
+                      <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
+                    </BarChart>
+                  </ChartContainer>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
           {/* Daily Breakdown Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Daily Breakdown Details</CardTitle>
-              <CardDescription>Detailed statistics for each day of the week</CardDescription>
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="text-base sm:text-lg md:text-xl">Daily Breakdown Details</CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1">Detailed statistics for each day of the week</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Total Orders</TableHead>
-                    <TableHead>Completed Orders</TableHead>
-                    <TableHead>Weight Sold</TableHead>
-                    <TableHead className="text-right">Revenue</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {dailyBreakdown.map((day) => (
-                    <TableRow key={day.fullDate}>
-                      <TableCell className="font-medium">{day.date}</TableCell>
-                      <TableCell>{day.orders}</TableCell>
-                      <TableCell>{day.completedOrders}</TableCell>
-                      <TableCell>{day.weight.toFixed(2)} kg</TableCell>
-                      <TableCell className="text-right">₹{day.revenue.toLocaleString('en-IN')}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              {/* ✅ FIX: Scrollable table container for mobile */}
+              <div className="w-full overflow-x-auto -mx-3 sm:-mx-4 lg:-mx-6">
+                <div className="min-w-[600px] px-3 sm:px-4 lg:px-6">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Total Orders</TableHead>
+                        <TableHead>Completed Orders</TableHead>
+                        <TableHead>Weight Sold</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dailyBreakdown.map((day) => (
+                        <TableRow key={day.fullDate}>
+                          <TableCell className="font-medium">{day.date}</TableCell>
+                          <TableCell>{day.orders}</TableCell>
+                          <TableCell>{day.completedOrders}</TableCell>
+                          <TableCell>{day.weight.toFixed(2)} kg</TableCell>
+                          <TableCell className="text-right">₹{day.revenue.toLocaleString('en-IN')}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
-      )}
+        </TabsContent>
 
-      {/* Monthly Report Section */}
-      {showMonthlyReport && (
-        <div className="space-y-6">
-          <Card className="border-green-200 bg-green-50 dark:bg-green-950/20">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-300">
-                <FileText className="h-5 w-5" />
-                Monthly Report ({format(monthStart, 'MMM dd')} - {format(monthEnd, 'MMM dd, yyyy')})
+        {/* Monthly Tab */}
+        <TabsContent value="monthly" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <div className="space-y-6">
+            <Card className="border-green-200 bg-green-50 dark:bg-green-950/20 w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 text-green-700 dark:text-green-300 text-base sm:text-lg md:text-xl">
+                <span className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+                  <span>Monthly Report</span>
+                </span>
+                <span className="text-xs sm:text-sm text-green-600 dark:text-green-400">({format(monthStart, 'MMM dd')} - {format(monthEnd, 'MMM dd')})</span>
               </CardTitle>
-              <CardDescription className="text-green-600 dark:text-green-400">
+              <CardDescription className="text-green-600 dark:text-green-400 text-xs sm:text-sm mt-1">
                 Summary of the current month's performance
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-4">
+            <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              <div className="grid gap-2 sm:gap-3 md:gap-4 grid-cols-2 md:grid-cols-4">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                  <div className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300">
                     ₹{monthlyRevenue.toLocaleString('en-IN')}
                   </div>
-                  <p className="text-sm text-green-600 dark:text-green-400">Total Revenue</p>
+                  <p className="text-xs sm:text-sm text-green-600 dark:text-green-400 mt-1">Total Revenue</p>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                  <div className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300">
                     {monthlyOrders.length}
                   </div>
-                  <p className="text-sm text-green-600 dark:text-green-400">Total Orders</p>
+                  <p className="text-xs sm:text-sm text-green-600 dark:text-green-400 mt-1">Total Orders</p>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                  <div className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300">
                     {monthlyCompletedOrders.length}
                   </div>
-                  <p className="text-sm text-green-600 dark:text-green-400">Completed Orders</p>
+                  <p className="text-xs sm:text-sm text-green-600 dark:text-green-400 mt-1">Completed Orders</p>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                  <div className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300">
                     {monthlyWeightSold.toFixed(2)} kg
                   </div>
-                  <p className="text-sm text-green-600 dark:text-green-400">Total Weight Sold</p>
+                  <p className="text-xs sm:text-sm text-green-600 dark:text-green-400 mt-1">Total Weight Sold</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Weekly Breakdown Chart for Month */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Weekly Performance Breakdown</CardTitle>
-              <CardDescription>Revenue and orders for each week of the month</CardDescription>
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="text-base sm:text-lg md:text-xl">Weekly Performance Breakdown</CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1">Revenue and orders for each week of the month</CardDescription>
             </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                <BarChart accessibilityLayer data={weeklyBreakdown}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="week"
-                    tickLine={false}
-                    tickMargin={10}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={10}
-                    tickFormatter={(value) => `₹${value}`}
-                  />
-                  <ChartTooltip
-                    cursor={false}
-                    content={<ChartTooltipContent indicator="dot" />}
-                  />
-                  <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
-                </BarChart>
-              </ChartContainer>
+            <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              {/* ✅ FIX: Scrollable chart container */}
+              <div className="w-full overflow-x-auto -mx-2 sm:-mx-4 lg:-mx-6">
+                <div className="min-w-[400px] px-2 sm:px-4 lg:px-6">
+                  <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                    <BarChart accessibilityLayer data={weeklyBreakdown}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis
+                        dataKey="week"
+                        tickLine={false}
+                        tickMargin={10}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={10}
+                        tickFormatter={(value) => `₹${value}`}
+                      />
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent indicator="dot" />}
+                      />
+                      <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
+                    </BarChart>
+                  </ChartContainer>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
           {/* Weekly Breakdown Table for Month */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Weekly Breakdown Details</CardTitle>
-              <CardDescription>Detailed statistics for each week of the month</CardDescription>
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-3 sm:px-4 lg:px-6">
+              <CardTitle className="text-base sm:text-lg md:text-xl">Weekly Breakdown Details</CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1">Detailed statistics for each week of the month</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Week</TableHead>
-                    <TableHead>Date Range</TableHead>
-                    <TableHead>Total Orders</TableHead>
-                    <TableHead>Completed Orders</TableHead>
-                    <TableHead>Weight Sold</TableHead>
-                    <TableHead className="text-right">Revenue</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {weeklyBreakdown.map((week) => (
-                    <TableRow key={week.fullDate}>
-                      <TableCell className="font-medium">{week.week}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{week.dateRange}</TableCell>
-                      <TableCell>{week.orders}</TableCell>
-                      <TableCell>{week.completedOrders}</TableCell>
-                      <TableCell>{week.weight.toFixed(2)} kg</TableCell>
-                      <TableCell className="text-right">₹{week.revenue.toLocaleString('en-IN')}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <CardContent className="px-3 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              {/* ✅ FIX: Scrollable table container for mobile */}
+              <div className="w-full overflow-x-auto -mx-3 sm:-mx-4 lg:-mx-6">
+                <div className="min-w-[700px] px-3 sm:px-4 lg:px-6">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Week</TableHead>
+                        <TableHead>Date Range</TableHead>
+                        <TableHead>Total Orders</TableHead>
+                        <TableHead>Completed Orders</TableHead>
+                        <TableHead>Weight Sold</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {weeklyBreakdown.map((week) => (
+                        <TableRow key={week.fullDate}>
+                          <TableCell className="font-medium">{week.week}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{week.dateRange}</TableCell>
+                          <TableCell>{week.orders}</TableCell>
+                          <TableCell>{week.completedOrders}</TableCell>
+                          <TableCell>{week.weight.toFixed(2)} kg</TableCell>
+                          <TableCell className="text-right">₹{week.revenue.toLocaleString('en-IN')}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue Today</CardTitle>
-            <IndianRupee className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {currentIsLoading ? (
-              <>
-                <Skeleton className="h-8 w-24 mb-2" />
-                <Skeleton className="h-4 w-32" />
-              </>
-            ) : (
-              <>
-                <div className="text-2xl font-bold">₹{completedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0).toLocaleString('en-IN')}</div>
-                <p className="text-xs text-muted-foreground">From {completedOrders.length} completed orders today {todayDeclinedOrders.length > 0 && `(${todayDeclinedOrders.length} declined shown separately)`}</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Orders Today</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {currentIsLoading ? (
-              <>
-                <Skeleton className="h-8 w-16 mb-2" />
-                <Skeleton className="h-4 w-28" />
-              </>
-            ) : (
-              <>
-                <div className="text-2xl font-bold">{dailyOrders.length}</div>
-                <p className="text-xs text-muted-foreground">{completedOrders.length} completed today</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Weight Sold Today</CardTitle>
-            <Weight className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {currentIsLoading ? (
-              <>
-                <Skeleton className="h-8 w-20 mb-2" />
-                <Skeleton className="h-4 w-24" />
-              </>
-            ) : (
-              <>
-                <div className="text-2xl font-bold">{dailyWeightSold.toFixed(2)} kg</div>
-                <p className="text-xs text-muted-foreground">Across all items today</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg. Preparation Time</CardTitle>
-            <Timer className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {currentIsLoading ? (
-              <>
-                <Skeleton className="h-8 w-18 mb-2" />
-                <Skeleton className="h-4 w-32" />
-              </>
-            ) : (
-              <>
-                <div className="text-2xl font-bold">{avgPrepTimeInMinutes.toFixed(1)} min</div>
-                <p className="text-xs text-muted-foreground">Across all completed orders</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Declined Orders Card - Show separately */}
-      {todayDeclinedOrders.length > 0 && (
-        <Card className="border-red-200 bg-red-50 dark:bg-red-950/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300">Declined Orders Today</CardTitle>
-            <XCircle className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600 dark:text-red-400">
-              -₹{todayDeclinedOrders.reduce((acc, order) => acc + calculateOrderRevenue(order), 0).toLocaleString('en-IN')}
-            </div>
-            <p className="text-xs text-red-600 dark:text-red-400">
-              Lost revenue from {todayDeclinedOrders.length} declined orders (not included in total)
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Today's Revenue by Order</CardTitle>
-            <CardDescription>A summary of revenue generated from each order today.</CardDescription>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <ChartContainer config={chartConfig} className="h-[300px] w-full">
-              <BarChart accessibilityLayer data={chartData}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  dataKey="id"
-                  tickLine={false}
-                  tickMargin={10}
-                  axisLine={false}
-                  tickFormatter={(value) => value.slice(-3)}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={10}
-                  tickFormatter={(value) => `₹${value}`}
-                />
-                <ChartTooltip
-                  cursor={false}
-                  content={<ChartTooltipContent indicator="dot" />}
-                />
-                <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Item-wise Statistics */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Item-wise Sales Today</CardTitle>
-          <CardDescription>Weight sold and revenue generated for each item today.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Item Name</TableHead>
-                <TableHead>Total Weight Sold</TableHead>
-                <TableHead>Orders</TableHead>
-                <TableHead className="text-right">Revenue</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {Object.entries(itemStats).length > 0 ? Object.entries(itemStats).map(([itemName, stats]) => (
-                <TableRow key={itemName}>
-                  <TableCell className="font-medium">{itemName}</TableCell>
-                  <TableCell>{stats.totalWeight.toFixed(2)} kg</TableCell>
-                  <TableCell>{stats.count}</TableCell>
-                  <TableCell className="text-right">₹{stats.totalRevenue.toFixed(2)}</TableCell>
-                </TableRow>
-              )) : (
-                <TableRow>
-                  <TableCell colSpan={4} className="h-24 text-center">
-                    No sales data available today.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
         </TabsContent>
       </Tabs>
 

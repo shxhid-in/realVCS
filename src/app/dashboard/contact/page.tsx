@@ -6,6 +6,7 @@ import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
 import { Textarea } from "../../../components/ui/textarea"
 import { Label } from "../../../components/ui/label"
+import { Checkbox } from "../../../components/ui/checkbox"
 import { ConfirmationDialog } from "../../../components/ui/confirmation-dialog"
 import { useToast } from "../../../hooks/use-toast"
 import { useAuth } from "../../../context/AuthContext"
@@ -18,12 +19,8 @@ export default function ContactPage() {
   
   // Contact form state
   const [contactMessage, setContactMessage] = useState('');
-  const [packingRequests, setPackingRequests] = useState<{[size: string]: number}>({
-    '0.5kg': 0,
-    '1kg': 0,
-    '1.5kg': 0,
-    '2kg': 0
-  });
+  const [selectedPacks, setSelectedPacks] = useState<string[]>([]);
+  const availablePacks = ['0.5kg', '1kg', '1.5kg', '2kg'];
   const [isSubmittingContact, setIsSubmittingContact] = useState(false);
   const [supportHistory, setSupportHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -58,13 +55,13 @@ export default function ContactPage() {
     
     setIsSubmittingContact(true);
     try {
-      const hasPackingRequest = Object.values(packingRequests).some(count => count > 0);
+      const hasPackingRequest = selectedPacks.length > 0;
       
       if (!contactMessage.trim() && !hasPackingRequest) {
         toast({
           variant: "destructive",
           title: "Validation Error",
-          description: "Please provide a message or select packing quantities.",
+          description: "Please provide a message or select packing supplies.",
         });
         return;
       }
@@ -73,7 +70,7 @@ export default function ContactPage() {
         butcherId: butcher.id,
         butcherName: butcher.name,
         message: contactMessage.trim(),
-        packingRequests: hasPackingRequest ? packingRequests : null,
+        packingRequests: hasPackingRequest ? selectedPacks : null,
         timestamp: new Date().toISOString(),
         type: hasPackingRequest ? 'packing_request' : 'general_contact'
       };
@@ -98,12 +95,7 @@ export default function ContactPage() {
       
       // Reset form
       setContactMessage('');
-      setPackingRequests({
-        '0.5kg': 0,
-        '1kg': 0,
-        '1.5kg': 0,
-        '2kg': 0
-      });
+      setSelectedPacks([]);
       
       // Refresh support history
       fetchSupportHistory();
@@ -288,28 +280,45 @@ export default function ContactPage() {
               Request Packing Supplies
             </CardTitle>
             <CardDescription>
-              Request packing materials if you're running low on supplies.
+              Select the packing materials you need by ticking the boxes.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {Object.entries(packingRequests).map(([size, count]) => (
-                <div key={size} className="space-y-2">
-                  <Label htmlFor={`packing-${size}`}>{size} Bags</Label>
-                  <Input
+              {availablePacks.map((size) => (
+                <div key={size} className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <Checkbox
                     id={`packing-${size}`}
-                    type="number"
-                    min="0"
-                    value={count}
-                    onChange={(e) => setPackingRequests(prev => ({
-                      ...prev,
-                      [size]: parseInt(e.target.value) || 0
-                    }))}
-                    placeholder="0"
+                    checked={selectedPacks.includes(size)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedPacks(prev => [...prev, size]);
+                      } else {
+                        setSelectedPacks(prev => prev.filter(p => p !== size));
+                      }
+                    }}
                   />
+                  <Label 
+                    htmlFor={`packing-${size}`}
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                  >
+                    {size} Bags
+                  </Label>
                 </div>
               ))}
             </div>
+            {selectedPacks.length > 0 && (
+              <div className="mt-4 p-3 bg-muted rounded-lg">
+                <p className="text-sm font-medium mb-2">Selected packs:</p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPacks.map((size) => (
+                    <Badge key={size} variant="secondary">
+                      {size}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
         
@@ -421,18 +430,16 @@ export default function ContactPage() {
                       </div>
                     )}
                     
-                    {request.packingRequests && (
+                    {request.packingRequests && Array.isArray(request.packingRequests) && request.packingRequests.length > 0 && (
                       <div>
                         <h4 className="font-medium mb-1">Packing Request:</h4>
                         <div className="flex gap-2 flex-wrap">
-                          {Object.entries(request.packingRequests).map(([size, count]) => {
-                            const numCount = count as number;
-                            return numCount > 0 && (
-                              <Badge key={size} variant="outline">
-                                {size}: {numCount} bags
-                              </Badge>
-                            );
-                          })}
+                          {request.packingRequests.map((size: string) => (
+                            <Badge key={size} variant="outline" className="flex items-center gap-1">
+                              <span className="text-green-600">✓</span>
+                              {size}
+                            </Badge>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -474,3 +481,4 @@ export default function ContactPage() {
     </div>
   )
 }
+

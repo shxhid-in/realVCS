@@ -15,22 +15,22 @@ const inter = {
 };
 
 export const metadata: Metadata = {
-  title: 'ButcherBot POS',
-  description: 'A Modern Point of Sale System for Butchers',
+  title: 'VCS - Vendor Communication System',
+  description: 'Vendor Communication System - A Modern Point of Sale System for Butchers',
   manifest: getManifestUrl({ slug: 'twa', baseUrl: process.env.NEXT_PUBLIC_BASE_URL || '' }),
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'ButcherBot POS',
+    title: 'VCS',
   },
   formatDetection: {
     telephone: false,
   },
   openGraph: {
     type: 'website',
-    siteName: 'ButcherBot POS',
-    title: 'ButcherBot POS',
-    description: 'A Modern Point of Sale System for Butchers',
+    siteName: 'VCS',
+    title: 'VCS - Vendor Communication System',
+    description: 'Vendor Communication System - A Modern Point of Sale System for Butchers',
   },
   icons: {
     icon: '/favicon.png',
@@ -55,10 +55,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="application-name" content="ButcherBot POS" />
+        <meta name="application-name" content="VCS" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="ButcherBot POS" />
+        <meta name="apple-mobile-web-app-title" content="VCS" />
         <meta name="format-detection" content="telephone=no" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="msapplication-TileColor" content="#000000" />
@@ -71,16 +71,16 @@ export default function RootLayout({
         
         {/* Social meta tags */}
         <meta name="twitter:card" content="summary" />
-        <meta name="twitter:url" content="https://butcherbot-pos.com" />
-        <meta name="twitter:title" content="ButcherBot POS" />
-        <meta name="twitter:description" content="A Modern Point of Sale System for Butchers" />
+        <meta name="twitter:url" content="https://vcs-system.com" />
+        <meta name="twitter:title" content="VCS - Vendor Communication System" />
+        <meta name="twitter:description" content="Vendor Communication System - A Modern Point of Sale System for Butchers" />
         <meta name="twitter:image" content="/icons/icon-128.png" />
-        <meta name="twitter:creator" content="@butcherbot" />
+        <meta name="twitter:creator" content="@vcs" />
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="ButcherBot POS" />
-        <meta property="og:description" content="A Modern Point of Sale System for Butchers" />
-        <meta property="og:site_name" content="ButcherBot POS" />
-        <meta property="og:url" content="https://butcherbot-pos.com" />
+        <meta property="og:title" content="VCS - Vendor Communication System" />
+        <meta property="og:description" content="Vendor Communication System - A Modern Point of Sale System for Butchers" />
+        <meta property="og:site_name" content="VCS" />
+        <meta property="og:url" content="https://vcs-system.com" />
         <meta property="og:image" content="/icons/icon-128.png" />
       </head>
       <body className={`${inter.variable} font-sans antialiased`}>

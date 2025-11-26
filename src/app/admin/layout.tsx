@@ -24,7 +24,10 @@ export default function AdminLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      {children}
+      {/* ✅ FIX: Remove fixed positioning, add proper layout */}
+      <div className="w-full">
+        {children}
+      </div>
     </div>
   )
 }

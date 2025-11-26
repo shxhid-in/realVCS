@@ -43,54 +43,57 @@ const SizeEditor = ({
   onUpdate: (updatedSize: Partial<MenuItemSize>) => void
 }) => {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {unit === 'kg' ? (
         <div className="space-y-2">
-          <Label htmlFor={`price-${size.id}`}>Price per kg (₹)</Label>
-            <Input 
+          <Label htmlFor={`price-${size.id}`} className="text-xs sm:text-sm">Price per kg (₹)</Label>
+          <Input 
             id={`price-${size.id}`} 
             type="number" 
             value={size.price}
-        onChange={(e) => {
-          const inputValue = e.target.value;
-          const parsedPrice = parseFloat(inputValue) || 0;
-          onUpdate({ price: parsedPrice });
-        }}
-        onBlur={(e) => {
-          const inputValue = e.target.value;
-          const parsedPrice = parseFloat(inputValue) || 0;
-          onUpdate({ price: parsedPrice });
-        }}
+            className="text-sm sm:text-base"
+            onChange={(e) => {
+              const inputValue = e.target.value;
+              const parsedPrice = parseFloat(inputValue) || 0;
+              onUpdate({ price: parsedPrice });
+            }}
+            onBlur={(e) => {
+              const inputValue = e.target.value;
+              const parsedPrice = parseFloat(inputValue) || 0;
+              onUpdate({ price: parsedPrice });
+            }}
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
           <div className="space-y-2">
-            <Label htmlFor={`price-nos-${size.id}`}>Price per Piece (₹)</Label>
+            <Label htmlFor={`price-nos-${size.id}`} className="text-xs sm:text-sm">Price per Piece (₹)</Label>
             <Input 
               id={`price-nos-${size.id}`} 
               type="number" 
               value={size.price}
-        onChange={(e) => {
-          const inputValue = e.target.value;
-          const parsedPrice = parseFloat(inputValue) || 0;
-          onUpdate({ price: parsedPrice });
-        }}
-        onBlur={(e) => {
-          const inputValue = e.target.value;
-          const parsedPrice = parseFloat(inputValue) || 0;
-          onUpdate({ price: parsedPrice });
-        }}
+              className="text-sm sm:text-base"
+              onChange={(e) => {
+                const inputValue = e.target.value;
+                const parsedPrice = parseFloat(inputValue) || 0;
+                onUpdate({ price: parsedPrice });
+              }}
+              onBlur={(e) => {
+                const inputValue = e.target.value;
+                const parsedPrice = parseFloat(inputValue) || 0;
+                onUpdate({ price: parsedPrice });
+              }}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`min-weight-${size.id}`}>Min Weight (kg)</Label>
+            <Label htmlFor={`min-weight-${size.id}`} className="text-xs sm:text-sm">Min Weight (kg)</Label>
             <Input 
               id={`min-weight-${size.id}`} 
               type="number" 
               step="0.01"
               min="0"
               value={size.minWeight || ''}
+              className="text-sm sm:text-base"
               onChange={(e) => {
                 const value = e.target.value;
                 onUpdate({ minWeight: value === '' ? undefined : parseFloat(value) });
@@ -98,13 +101,14 @@ const SizeEditor = ({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`max-weight-${size.id}`}>Max Weight (kg)</Label>
+            <Label htmlFor={`max-weight-${size.id}`} className="text-xs sm:text-sm">Max Weight (kg)</Label>
             <Input 
               id={`max-weight-${size.id}`} 
               type="number" 
               step="0.01"
               min="0"
               value={size.maxWeight || ''}
+              className="text-sm sm:text-base"
               onChange={(e) => {
                 const value = e.target.value;
                 onUpdate({ maxWeight: value === '' ? undefined : parseFloat(value) });
@@ -132,6 +136,7 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
     const hasAnyPrice = newSizes.some(size => size.price > 0);
     
     // Update both sizes and availability
+    // Auto-update availability based on price: if any size has price > 0, item is available
     onUpdate({ 
       sizes: newSizes,
       available: hasAnyPrice
@@ -140,12 +145,12 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
   
   const TabsValue = (item.sizes && item.sizes.length > 0) ? item.sizes[0].id : "new";
   
-  const isFishButcher = ['kak', 'ka_sons', 'alif'].includes(butcherId);
   const isMeatCategory = categoryName.toLowerCase() === 'meat items';
   
   // For fish butchers, always show all three sizes (small, medium, big)
   // For meat items, use only default size
-  const hasComplexSizing = isFishButcher && !isMeatCategory;
+  // Use the imported isFishButcher function which includes test_fish
+  const hasComplexSizing = isFishButcher(butcherId) && !isMeatCategory;
 
   // Initialize sizes if they don't exist
   React.useEffect(() => {
@@ -175,12 +180,13 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
   }, [hasComplexSizing, item.sizes.length, onUpdate]);
 
   return (
-    <div className="p-4 border rounded-lg">
-      <div className="flex items-center justify-between mb-4">
-        <Label className="font-semibold text-base">{getItemDisplayName(item.name, butcherId)}</Label>
-        <div className="flex items-center gap-4">
+    <div className="p-3 sm:p-4 border rounded-lg">
+      {/* ✅ FIX: Responsive layout for menu item editor */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4">
+        <Label className="font-semibold text-sm sm:text-base break-words">{getItemDisplayName(item.name, butcherId)}</Label>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <div className="flex items-center gap-2">
-            <Label htmlFor={`available-${item.id}`} className="text-sm text-muted-foreground">Available</Label>
+            <Label htmlFor={`available-${item.id}`} className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">Available</Label>
             <Switch 
               id={`available-${item.id}`} 
               checked={item.available}
@@ -191,7 +197,7 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
             value={item.unit}
             onValueChange={(value: 'kg' | 'nos') => onUpdate({ unit: value })}
           >
-            <SelectTrigger id={`unit-${item.id}`} className="w-[120px]">
+            <SelectTrigger id={`unit-${item.id}`} className="w-[100px] sm:w-[120px] text-xs sm:text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -205,13 +211,13 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
       {item.sizes && item.sizes.length > 0 ? (
         hasComplexSizing ? (
           // For fish butchers, show all three sizes in a grid layout
-          <div className="pt-4 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="pt-2 sm:pt-4 space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               {item.sizes.map(size => (
-                <div key={size.id} className="border rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <Label className="font-medium capitalize">{size.size}</Label>
-                    <div className="text-sm text-muted-foreground">
+                <div key={size.id} className="border rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center justify-between mb-2 sm:mb-3">
+                    <Label className="font-medium capitalize text-sm sm:text-base">{size.size}</Label>
+                    <div className="text-xs sm:text-sm text-muted-foreground">
                       {size.price > 0 ? 'Available' : 'Not Available'}
                     </div>
                   </div>
@@ -275,17 +281,43 @@ export default function MenuManagementPage() {
 
   if (!butcher) return null;
 
-  const isFishButcher = ['kak', 'ka_sons', 'alif'].includes(butcher.id);
   // Base visibility rules (hide Mutton for 'usaj')
   const baseVisibleMenu = butcher.id === 'usaj'
     ? menu.filter(cat => cat.name.toLowerCase() !== 'mutton')
     : menu;
-  // Apply search filter for fish butchers
-  const filteredMenu: MenuCategory[] = (isFishButcher && searchQuery.trim().length > 0)
+  
+  // Helper function to extract searchable names from item name
+  const getSearchableNames = (itemName: string): string[] => {
+    const names: string[] = [];
+    const lowerName = itemName.toLowerCase();
+    
+    // If item name has three-language format (Manglish - English - Malayalam)
+    if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
+      const parts = itemName.split(' - ');
+      // Add Manglish name (first part)
+      names.push(parts[0].trim().toLowerCase());
+      // Add English name (second part)
+      names.push(parts[1].trim().toLowerCase());
+      // Add full name
+      names.push(lowerName);
+    } else {
+      // Single name - add as is
+      names.push(lowerName);
+    }
+    
+    return names;
+  };
+  
+  // Apply search filter for all butchers
+  const filteredMenu: MenuCategory[] = (searchQuery.trim().length > 0)
     ? baseVisibleMenu
         .map(cat => ({
           ...cat,
-          items: cat.items.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()))
+          items: cat.items.filter(item => {
+            const searchableNames = getSearchableNames(item.name);
+            const query = searchQuery.toLowerCase();
+            return searchableNames.some(name => name.includes(query));
+          })
         }))
         .filter(cat => cat.items.length > 0)
     : baseVisibleMenu;
@@ -424,19 +456,20 @@ export default function MenuManagementPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-start">
+    <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 space-y-4 sm:space-y-6">
+      {/* ✅ FIX: Responsive header matching order page */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Menu Management</h1>
-          <p className="text-muted-foreground">Update item prices and availability for your shop.</p>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Menu Management</h1>
+          <p className="text-sm sm:text-base text-muted-foreground mt-1">Update item prices and availability for your shop.</p>
           {isDataFromSheet && (
-            <div className="mt-2 flex items-center gap-2 text-sm text-amber-600">
+            <div className="mt-2 flex items-center gap-2 text-xs sm:text-sm text-amber-600 dark:text-amber-400">
               <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
               Data loaded from Google Sheet
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <Button 
             variant="outline" 
             size="sm" 
@@ -460,38 +493,39 @@ export default function MenuManagementPage() {
         </div>
       </div>
 
-      {isFishButcher && (
         <Card>
-          <CardContent className="p-4">
+          <CardContent className="p-4 sm:p-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
               <div>
-                <Label htmlFor="menu-search">Search items</Label>
+                <Label htmlFor="menu-search" className="text-xs sm:text-sm">Search items</Label>
                 <Input
                   id="menu-search"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="mt-2"
+                placeholder="Search by Manglish or English name..."
+                  className="mt-2 text-sm sm:text-base"
                 />
               </div>
             </div>
           </CardContent>
         </Card>
-      )}
 
       
       <form onSubmit={handleSubmit}>
         <Card>
-          <CardContent className="p-6">
+          {/* ✅ FIX: Responsive padding for menu card */}
+          <CardContent className="p-4 sm:p-6">
             {filteredMenu.length === 0 ? (
               <div className="text-sm text-muted-foreground">No items found.</div>
             ) : (
               <Accordion type="multiple" defaultValue={filteredMenu.map(cat => cat.id)} className="w-full">
                 {filteredMenu.map(category => (
                   <AccordionItem value={category.id} key={category.id}>
-                    <AccordionTrigger className="text-xl font-semibold">{category.name}</AccordionTrigger>
+                    <AccordionTrigger className="text-lg sm:text-xl font-semibold">{category.name}</AccordionTrigger>
                     <AccordionContent>
-                      <div className="space-y-6 pt-4">
+                      {/* ✅ FIX: Responsive spacing for menu items */}
+                      <div className="space-y-4 sm:space-y-6 pt-2 sm:pt-4">
                         {category.items.map(item => (
                           <MenuItemEditor 
                             key={item.id} 

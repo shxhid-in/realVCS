@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error processing contact request:', error);
+    console.error('[Contact] Error processing contact request:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error fetching support requests:', error);
+    console.error('[Contact] Error fetching support requests:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -107,7 +107,7 @@ export async function PUT(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error updating support request:', error);
+    console.error('[Contact] Error updating support request:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -137,7 +137,7 @@ export async function DELETE(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error deleting support request:', error);
+    console.error('[Contact] Error deleting support request:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

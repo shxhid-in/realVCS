@@ -225,6 +225,20 @@
   .status-rejected {
     @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200;
   }
+
+  /* Hide scrollbars but keep functionality - only hides scrollbar, doesn't affect overflow */
+  .scrollbar-hide {
+    -ms-overflow-style: none !important;  /* IE and Edge */
+    scrollbar-width: none !important;  /* Firefox */
+    -webkit-overflow-scrolling: touch;  /* Smooth scrolling on iOS */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none !important;  /* Chrome, Safari and Opera */
+    width: 0 !important;
+    height: 0 !important;
+    background: transparent !important;
+  }
 }
 
 @keyframes fadeIn {

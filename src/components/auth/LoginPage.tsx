@@ -37,8 +37,8 @@ export default function LoginPage() {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
              <UtensilsCrossed className="h-8 w-8" />
           </div>
-          <CardTitle className="text-2xl font-bold">ButcherBot POS</CardTitle>
-          <CardDescription>Sign in to your butcher account</CardDescription>
+          <CardTitle className="text-2xl font-bold">VCS</CardTitle>
+          <CardDescription>Vendor Communication System - Sign in to your account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

@@ -1,17 +1,36 @@
-
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getFishItemFullName, isFishButcher, freshButchers } from '../../lib/freshMockData';
+import { getFishItemFullName, freshButchers } from '../../lib/freshMockData';
 import { getCommissionRate } from '../../lib/rates';
 import { getRatesFromSheet } from '../../lib/sheets';
-// Removed direct import of salesSheets to avoid client-side Node.js modules
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AlertCircle, CheckCircle, Clock, X, Package, Timer, AlertTriangle, Loader2, ThumbsUp, ThumbsDown, MapPin, Weight, IndianRupee, PackageCheck, CookingPot } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import { Order, OrderItem } from '@/lib/types';
+import { useOrderCache } from '@/hooks/useOrderCache';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Helper function to determine if a butcher is a meat butcher
 function isMeatButcher(butcherId: string): boolean {
-    return ['usaj', 'usaj_mutton', 'pkd'].includes(butcherId);
+    return ['usaj', 'usaj_mutton', 'pkd', 'test_meat'].includes(butcherId);
+}
+
+// Helper function to determine if a butcher is a fish butcher (local version to avoid import conflict)
+function isFishButcherLocal(butcherId: string): boolean {
+    return ['kak', 'ka_sons', 'alif', 'test_fish'].includes(butcherId);
 }
 
 // Helper function to determine if a chicken item needs weight dialog
@@ -42,327 +61,564 @@ function getDisplayWeight(order: Order, butcherId: string): number {
     return order.pickedWeight || 0;
 }
 
-// Separate component for the reject dialog that won't be affected by polling
+// Helper function to get display order ID
+function getDisplayOrderId(orderId: string): string {
+    return orderId.replace('ORD-', '');
+}
+
+// Helper function to get item display name
+function getItemDisplayName(itemName: string, butcherId: string): string {
+    if (isFishButcherLocal(butcherId) && itemName.includes(' - ')) {
+        const parts = itemName.split(' - ');
+        return parts[1] || itemName; // Return English name (middle part)
+    }
+    return itemName;
+}
+
+// Countdown Timer Component
+const CountdownTimer = ({ startTime, orderStatus }: { startTime: Date; orderStatus: string }) => {
+    const [timeLeft, setTimeLeft] = useState<number>(0);
+    const [isOverdue, setIsOverdue] = useState(false);
+
+    useEffect(() => {
+        const updateTimer = () => {
+            const now = new Date();
+            const elapsed = now.getTime() - startTime.getTime();
+            const remaining = Math.max(0, (20 * 60 * 1000) - elapsed); // 20 minutes in milliseconds
+            
+            setTimeLeft(remaining);
+            setIsOverdue(remaining === 0);
+        };
+
+        updateTimer();
+        const interval = setInterval(updateTimer, 1000);
+
+        return () => clearInterval(interval);
+    }, [startTime]);
+
+    const minutes = Math.floor(timeLeft / 60000);
+    const seconds = Math.floor((timeLeft % 60000) / 1000);
+
+    if (orderStatus !== 'preparing') return null;
+
+    return (
+        <div className={cn(
+            "flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium",
+            isOverdue 
+                ? "bg-red-100 text-red-700 border border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800" 
+                : "bg-orange-100 text-orange-700 border border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-800"
+        )}>
+            <Timer className="h-4 w-4" />
+            {isOverdue ? 'Overdue' : `${minutes}:${seconds.toString().padStart(2, '0')}`}
+        </div>
+    );
+};
+
+// Skeleton Order Card Component for Optimistic Updates
+const SkeletonOrderCard = ({ order }: { order: Order }) => {
+    return (
+        <Card className="bg-white dark:bg-gray-900 border-l-4 border-orange-500 opacity-75">
+            <CardHeader className="pb-2 pt-3 px-4">
+                <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                        <Skeleton className="h-6 w-24" />
+                        <Skeleton className="h-4 w-32" />
+                    </div>
+                    <Skeleton className="h-6 w-20 rounded-md" />
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-3 py-3">
+                <div className="space-y-2">
+                    {order.items.map((item, index) => (
+                        <div key={item.id} className="p-2.5 rounded-lg bg-muted/30 border border-border/50">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <Skeleton className="h-4 w-32" />
+                                <Skeleton className="h-4 w-16 rounded-full" />
+                                <Skeleton className="h-4 w-20 rounded-full" />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </CardContent>
+            <CardFooter className="pt-2 pb-3 px-4">
+                <div className="flex justify-end gap-2 w-full">
+                    <Skeleton className="h-8 w-20" />
+                </div>
+            </CardFooter>
+        </Card>
+    );
+};
+
+// Reject Dialog Component
 const RejectDialog = ({ 
     order, 
     rejectDialogState, 
     updateRejectDialogState, 
     handleReject, 
-    onClose,
-    isLoading
+    handleRejectConfirm 
 }: {
     order: Order;
-    rejectDialogState: any;
+    rejectDialogState: { isOpen: boolean; reason: string };
     updateRejectDialogState: (updates: any) => void;
     handleReject: () => void;
-    onClose: () => void;
-    isLoading: boolean;
+    handleRejectConfirm: () => void;
 }) => {
-    if (!rejectDialogState.isOpen) {
-        return null;
-    }
-
-    return createPortal(
-        <Dialog open={true} onOpenChange={() => {}}>
-            <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
+    return (
+        <Dialog open={rejectDialogState.isOpen} onOpenChange={(open) => updateRejectDialogState({ isOpen: open })}>
+            <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Decline Order {getDisplayOrderId(order.id)}?</DialogTitle>
-                    <DialogDescription>Please provide a reason for declining this order. This cannot be undone.</DialogDescription>
+                    <DialogTitle>Reject Order</DialogTitle>
+                    <DialogDescription>
+                        Please provide a reason for rejecting order {getDisplayOrderId(order.id)}.
+                    </DialogDescription>
                 </DialogHeader>
-                <Textarea 
-                    value={rejectDialogState.reason} 
-                    onChange={(e) => updateRejectDialogState({ reason: e.target.value })} 
-                    placeholder="Enter reason for declining this order..."
-                />
+                <div className="space-y-4">
+                    <div>
+                        <Label htmlFor="reject-reason">Reason for rejection</Label>
+                        <Textarea
+                            id="reject-reason"
+                            placeholder="Enter reason for rejecting this order..."
+                            value={rejectDialogState.reason}
+                            onChange={(e) => updateRejectDialogState({ reason: e.target.value })}
+                            className="mt-2"
+                        />
+                    </div>
+                </div>
                 <DialogFooter>
-                    <Button 
-                        variant="outline" 
-                        onClick={onClose}
-                        disabled={isLoading}
-                    >
+                    <Button variant="outline" onClick={handleReject}>
                         Cancel
                     </Button>
                     <Button 
                         variant="destructive" 
-                        onClick={handleReject} 
-                        disabled={isLoading}
+                        onClick={handleRejectConfirm}
+                        disabled={!rejectDialogState.reason.trim()}
                     >
-                        {isLoading ? (
-                            <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Processing...
-                            </>
-                        ) : (
-                            'Confirm Decline'
-                        )}
+                        Reject Order
                     </Button>
                 </DialogFooter>
             </DialogContent>
-        </Dialog>,
-        document.body
+        </Dialog>
     );
 };
 
-// Separate component for the weight dialog that won't be affected by polling
-const WeightDialog = ({ 
-    order, 
-    butcherId, 
-    dialogState, 
-    updateDialogState, 
-    handlePickedWeightSubmit, 
-    onClose 
+// Weight Dialog Component
+const ItemAcceptDialog = ({
+    order,
+    dialogState,
+    updateDialogState,
+    handleItemAccept,
+    handleItemCancel,
+    butcherId
 }: {
     order: Order;
-    butcherId: string;
-    dialogState: any;
+    dialogState: { isOpen: boolean; currentIndex: number };
     updateDialogState: (updates: any) => void;
-    handlePickedWeightSubmit: () => void;
-    onClose: () => void;
+    handleItemAccept: () => void;
+    handleItemCancel: () => void;
+    butcherId: string;
 }) => {
-    if (!dialogState.isOpen) {
-        return null;
-    }
+    const currentItem = order.items[dialogState.currentIndex];
+    if (!currentItem) return null;
 
-    return createPortal(
-        <Dialog open={true} onOpenChange={() => {}}>
-            <DialogContent className="sm:max-w-[500px]" onPointerDownOutside={(e) => e.preventDefault()}>
+    return (
+        <Dialog open={dialogState.isOpen} onOpenChange={(open) => updateDialogState({ isOpen: open })}>
+            <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Enter Preparation Weight for {getDisplayOrderId(order.id)}</DialogTitle>
+                    <DialogTitle>Accept or Reject Item</DialogTitle>
                     <DialogDescription>
-                        Item {dialogState.currentIndex + 1} of {order.items.length}: {getItemDisplayName(order.items[dialogState.currentIndex]?.name || '', butcherId)}
-                        <br />
-                        {isMeatButcher(butcherId) ? 
-                            'Enter the actual preparation weight for this chicken item.' : 
-                            'Enter the preparation weight for this specific item.'
-                        }
+                        Item {dialogState.currentIndex + 1} of {order.items.length}: {getItemDisplayName(currentItem.name, butcherId)}
                     </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
-                    <div className="p-3 bg-muted rounded-lg">
-                        <div className="font-medium">{getItemDisplayName(order.items[dialogState.currentIndex]?.name || '', butcherId)}</div>
-                        <div className="text-sm text-muted-foreground">
-                            Quantity: {order.items[dialogState.currentIndex]?.quantity} {order.items[dialogState.currentIndex]?.unit}
-                            {order.items[dialogState.currentIndex]?.size && (
-                                <span className="ml-2">Size: {order.items[dialogState.currentIndex]?.size}</span>
-                            )}
-                        </div>
+                    <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
+                        <p className="text-sm font-medium">Item: <span className="font-semibold">{getItemDisplayName(currentItem.name, butcherId)}</span></p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            <span className="font-medium">Order Quantity:</span> {currentItem.quantity}{currentItem.unit}
+                        </p>
                     </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="picked-weight">Preparation Weight</Label>
-                        <div className="flex gap-2">
-                            <Input 
-                                id="picked-weight" 
-                                type="number" 
-                                step="0.1"
-                                min="0"
-                                placeholder="Enter weight"
-                                value={dialogState.weights[order.items[dialogState.currentIndex]?.name] || ''} 
-                                onChange={(e) => updateDialogState({
-                                    weights: {
-                                        ...dialogState.weights,
-                                        [order.items[dialogState.currentIndex]?.name]: e.target.value
-                                    }
-                                })} 
-                                onKeyDown={(e) => {
-                                    // Prevent Enter key from closing dialog
-                                    if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handlePickedWeightSubmit();
-                                    }
-                                }}
-                            />
-                            <Select value={dialogState.unit} onValueChange={(value: 'kg' | 'g') => updateDialogState({ unit: value })}>
-                                <SelectTrigger className="w-[100px]">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="kg">kg</SelectItem>
-                                    <SelectItem value="g">g</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                    {Object.keys(dialogState.weights).length > 0 && (
-                        <div className="text-sm text-muted-foreground">
-                            <strong>Weights entered:</strong>
-                            {Object.entries(dialogState.weights).map(([itemName, weight]) => (
-                                <div key={itemName} className="ml-2">• {itemName}: {weight} {dialogState.unit}</div>
-                            ))}
-                        </div>
-                    )}
                 </div>
-                <DialogFooter className="gap-2">
-                    <Button 
-                        variant="outline" 
-                        onClick={onClose}
+                <DialogFooter>
+                    <Button
+                        variant="destructive" 
+                        onClick={() => {
+                            // Open item rejection dialog - need to update parent dialog state
+                            // We'll pass this through handleItemCancel's updateDialogState
+                            updateDialogState({
+                                itemRejectDialog: {
+                                    isOpen: true,
+                                    reason: '',
+                                    itemId: currentItem.id
+                                }
+                            });
+                        }}
                     >
-                        Cancel
+                        Reject Item
                     </Button>
                     <Button 
-                        onClick={handlePickedWeightSubmit}
-                        disabled={!dialogState.weights[order.items[dialogState.currentIndex]?.name] || 
-                                 parseFloat(dialogState.weights[order.items[dialogState.currentIndex]?.name] || '0') <= 0}
+                        onClick={handleItemAccept}
                     >
-                        {dialogState.currentIndex < order.items.length - 1 ? 'Next Item' : 'Accept and Start Preparing'}
+                        {(() => {
+                            // Check if this is the last item that doesn't need weight
+                            const remainingItems = order.items.slice(dialogState.currentIndex + 1).filter(item => !needsWeightDialog(item.name));
+                            return remainingItems.length > 0 ? 'Next Item' : 'Complete';
+                        })()}
                     </Button>
                 </DialogFooter>
             </DialogContent>
-        </Dialog>,
-        document.body
+        </Dialog>
     );
 };
 
-// Helper function to get display name for items
-const getItemDisplayName = (itemName: string, butcherId: string): string => {
-  if (isFishButcher(butcherId)) {
-    // Check if the item name already has three languages (contains ' - ')
-    if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
-      // Already has three-language format, return as is
-      return itemName;
-    } else {
-      // Only has English name, try to get the full three-language name
-      return getFishItemFullName(itemName);
-    }
-  }
-  // For other butchers, return the name as is
-  return itemName;
+const WeightDialog = ({ 
+    order, 
+    dialogState, 
+    updateDialogState, 
+    handleWeightSubmit, 
+    handleWeightCancel,
+    butcherId
+}: {
+    order: Order;
+    dialogState: { isOpen: boolean; weights: {[itemName: string]: string}; rejectedItems: {[itemName: string]: string}; unit: 'kg' | 'nos'; currentIndex: number; itemRejectDialog?: any };
+    updateDialogState: (updates: any) => void;
+    handleWeightSubmit: () => void;
+    handleWeightCancel: () => void;
+    butcherId: string;
+}) => {
+    const currentItem = order.items[dialogState.currentIndex];
+    if (!currentItem) return null;
+
+    // Determine if item uses 'nos' (pieces) or 'kg' (weight)
+    // Check item unit from order
+    const itemUnit = currentItem.unit || 'kg'; // Default to kg if not specified
+    const isNosUnit = itemUnit === 'nos';
+    
+    // If unit is 'nos', force unit to 'nos', otherwise use dialogState.unit (kg)
+    const displayUnit = isNosUnit ? 'nos' : (dialogState.unit || 'kg');
+
+    const handleWeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        
+        // For 'nos' unit: only allow whole numbers
+        if (displayUnit === 'nos') {
+            // Remove any decimal points or non-numeric characters except empty
+            const wholeNumber = value.replace(/[^0-9]/g, '');
+            if (wholeNumber === '' || parseInt(wholeNumber) >= 0) {
+                updateDialogState({
+                    weights: {
+                        ...dialogState.weights,
+                        [currentItem.name]: wholeNumber
+                    }
+                });
+            }
+        } else {
+            // For 'kg' unit: allow rational numbers (decimals)
+            // Allow empty, numbers, and one decimal point
+            const decimalNumber = value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+            if (decimalNumber === '' || !isNaN(parseFloat(decimalNumber))) {
+                updateDialogState({
+                    weights: {
+                        ...dialogState.weights,
+                        [currentItem.name]: decimalNumber
+                    }
+                });
+            }
+        }
+    };
+
+    const validateWeight = (): boolean => {
+        const weight = dialogState.weights[currentItem.name];
+        if (!weight || weight.trim() === '') {
+            return false;
+        }
+        
+        if (displayUnit === 'nos') {
+            // Must be whole number >= 1
+            const num = parseInt(weight);
+            return !isNaN(num) && num >= 1 && num % 1 === 0;
+        } else {
+            // Must be positive number (rational or whole)
+            const num = parseFloat(weight);
+            return !isNaN(num) && num > 0;
+        }
+    };
+
+    return (
+        <Dialog open={dialogState.isOpen} onOpenChange={(open) => updateDialogState({ isOpen: open })}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Enter {displayUnit === 'nos' ? 'Quantity' : 'Weight'}</DialogTitle>
+                    <DialogDescription>
+                        Item {dialogState.currentIndex + 1} of {order.items.length}: {getItemDisplayName(currentItem.name, butcherId)}
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                    <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
+                        <p className="text-sm font-medium">Item: <span className="font-semibold">{getItemDisplayName(currentItem.name, butcherId)}</span></p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            <span className="font-medium">Order {currentItem.unit === 'nos' ? 'Quantity' : 'Weight'}:</span> {currentItem.quantity}{currentItem.unit}
+                        </p>
+                    </div>
+                    <div>
+                        <Label htmlFor="weight">
+                            {displayUnit === 'nos' ? 'Preparing Quantity (pieces)' : 'Preparing Weight (kilograms)'}
+                        </Label>
+                        <Input
+                            id="weight"
+                            type="text"
+                            inputMode={displayUnit === 'nos' ? 'numeric' : 'decimal'}
+                            step={displayUnit === 'nos' ? '1' : '0.01'}
+                            placeholder={displayUnit === 'nos' ? 'Enter quantity (whole number)' : 'Enter weight (e.g., 1.5 or 2)'}
+                            value={dialogState.weights[currentItem.name] || ''}
+                            onChange={handleWeightChange}
+                            className="mt-2"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                            {displayUnit === 'nos' 
+                                ? 'Enter whole number only (e.g., 1, 2, 10)' 
+                                : 'Enter weight in kilograms (e.g., 1.5, 2, 0.75)'}
+                        </p>
+                    </div>
+                    {!isNosUnit && (
+                    <div>
+                        <Label htmlFor="unit">Unit</Label>
+                        <Select 
+                                value={displayUnit} 
+                                onValueChange={(value: 'kg' | 'nos') => updateDialogState({ unit: value })}
+                        >
+                            <SelectTrigger>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="kg">Kilograms (kg)</SelectItem>
+                                    <SelectItem value="nos">Pieces (nos)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    )}
+                </div>
+                <DialogFooter>
+                    <Button
+                        variant="destructive" 
+                        onClick={() => {
+                            // Open item rejection dialog
+                            updateDialogState({
+                                itemRejectDialog: {
+                                    isOpen: true,
+                                    reason: '',
+                                    itemId: currentItem.id
+                                }
+                            });
+                        }}
+                    >
+                        Reject Item
+                    </Button>
+                    <Button 
+                        onClick={handleWeightSubmit}
+                        disabled={(() => {
+                            // If dialog is shown, weight is ALWAYS required
+                            const needsWeight = needsWeightDialog(currentItem.name) || !isMeatButcher(butcherId);
+                            if (needsWeight) {
+                                return !validateWeight();
+                            }
+                            // This should never happen since dialog only shows for items that need weight
+                            return true;
+                        })()}
+                    >
+                        {(() => {
+                            // Check if this is the last item that needs weight
+                            if (isMeatButcher(butcherId)) {
+                                const remainingNeedsWeight = order.items.slice(dialogState.currentIndex + 1).some(item => needsWeightDialog(item.name));
+                                return remainingNeedsWeight ? 'Next Item' : 'Complete';
+                            }
+                            return dialogState.currentIndex === order.items.length - 1 ? 'Complete' : 'Next Item';
+                        })()}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
 };
 
-// Helper function to extract order number from full order ID for display
-const getDisplayOrderId = (orderId: string): string => {
-  // Extract order number from ID like "ORD-2024-01-15-123" -> "ORD-123"
-  const orderIdParts = orderId.replace('ORD-', '').split('-');
-  const orderNumber = orderIdParts[orderIdParts.length - 1]; // Get the last part (order number)
-  return `ORD-${orderNumber}`;
-};
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../components/ui/dialog';
-import { Textarea } from '../../components/ui/textarea';
-import { Input } from '../../components/ui/input';
-import { Label } from '../../components/ui/label';
-import type { Order } from '../../lib/types';
-import { useOrderPolling, useOrderUpdate } from '../../hooks/useOrderPolling';
-import { useButcherEarnings } from '../../hooks/useButcherEarnings';
-import { ThumbsDown, ThumbsUp, Timer, CheckCircle, CookingPot, PackageCheck, AlertCircle, RefreshCw, MapPin, Loader2, Weight, Clock, IndianRupee } from 'lucide-react';
-import { useToast } from '../../hooks/use-toast';
-// Removed useOrderAlert import - using global alert system from layout instead
-import { Skeleton, OrderCardSkeleton } from '../../components/ui/skeleton';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { cn } from '../../lib/utils';
+// OrderCard Component
+const OrderCard = ({ 
+    order, 
+    onUpdate, 
+    butcherId, 
+    isArchived, 
+    butcherMenu, 
+    refetch, 
+    allOrders, 
+    globalDialogState, 
+    setGlobalDialogState, 
+    setCurrentDialogOrder,
+    setOptimisticTransitions
+}: {
+    order: Order;
+    onUpdate: (updatedOrder: Order) => Promise<void>;
+    butcherId: string;
+    isArchived?: boolean;
+    butcherMenu?: any;
+    refetch: () => Promise<void>;
+    allOrders: Order[];
+    globalDialogState: any;
+    setGlobalDialogState: (updater: any) => void;
+    setCurrentDialogOrder: (order: Order | null) => void;
+    setOptimisticTransitions: (updater: any) => void;
+}) => {
+    const [isLoading, setIsLoading] = useState(false);
+    const [pendingOperations, setPendingOperations] = useState<Set<string>>(new Set());
+    const { toast } = useToast();
+    
+    // ✅ FIX: Ref to store latest dialog state to avoid stale reads
+    const dialogStateRef = useRef<{ [orderId: string]: any }>({});
+    
+    // Check if this order has a pending operation
+    const isPending = pendingOperations.has(order.id);
 
-const CountdownTimer = ({ startTime, orderStatus }: { startTime: Date; orderStatus: string }) => {
-  const prepTime = 20 * 60 * 1000;
-  const endTime = startTime.getTime() + prepTime;
-  const [timeLeft, setTimeLeft] = useState(endTime - Date.now());
-  const [isCompleted, setIsCompleted] = useState(false);
-
-  useEffect(() => {
-    // Stop timer if order is completed, prepared, or rejected
-    if (['completed', 'prepared', 'rejected'].includes(orderStatus)) {
-      setIsCompleted(true);
-      return;
-    }
-
-    const timer = setInterval(() => {
-      const newTimeLeft = endTime - Date.now();
-      if (newTimeLeft <= 0) {
-        clearInterval(timer);
-        setTimeLeft(0);
-      } else {
-        setTimeLeft(newTimeLeft);
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [endTime, orderStatus]);
-
-  // Don't show timer if order is completed
-  if (isCompleted) {
-    return null;
-  }
-
-  const minutes = Math.floor((timeLeft / (1000 * 60)) % 60);
-  const seconds = Math.floor((timeLeft / 1000) % 60);
-
-  const isOvertime = timeLeft <= 0;
-
-  return (
-    <div className={`flex items-center gap-2 font-medium ${isOvertime ? 'text-red-500' : 'text-amber-600'}`}>
-      <Timer className="h-4 w-4" />
-      <span>
-        {isOvertime ? 'Overdue ' : ''}
-        {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
-      </span>
-    </div>
-  );
-};
-
-
-const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetch, allOrders, globalDialogState, setGlobalDialogState, setCurrentDialogOrder }: { order: Order; onUpdate: (updatedOrder: Order) => Promise<void>; butcherId: string; isArchived?: boolean; butcherMenu?: any; refetch: () => Promise<void>; allOrders: Order[]; globalDialogState: any; setGlobalDialogState: any; setCurrentDialogOrder: any }) => {
     // Check if order is overdue
     const isOverdue = order.status === 'preparing' && order.preparationStartTime && 
                       (Date.now() - order.preparationStartTime.getTime()) > (20 * 60 * 1000);
     
     // Get dialog state for this specific order from global state
-    const dialogState = globalDialogState[order.id] || {
+    // ✅ FIX: Also check ref for latest state (avoids stale reads)
+    const dialogState = dialogStateRef.current[order.id] || globalDialogState[order.id] || {
         isOpen: false,
         weights: {},
+        rejectedItems: {},
         unit: 'kg' as const,
+        currentIndex: 0,
+        itemAcceptDialog: { isOpen: false, currentIndex: 0 }
+    };
+    
+    // ✅ FIX: Sync ref with current global state (initialize and keep in sync)
+    useEffect(() => {
+        if (globalDialogState[order.id]) {
+            dialogStateRef.current[order.id] = globalDialogState[order.id];
+        } else if (!dialogStateRef.current[order.id]) {
+            // Initialize ref with default state if not set
+            dialogStateRef.current[order.id] = {
+                isOpen: false,
+                weights: {},
+                rejectedItems: {},
+                unit: 'kg' as const,
+                currentIndex: 0,
+                itemAcceptDialog: { isOpen: false, currentIndex: 0 }
+            };
+        }
+    }, [globalDialogState, order.id]);
+
+    const itemAcceptDialogState = globalDialogState[order.id]?.itemAcceptDialog || {
+        isOpen: false,
         currentIndex: 0
     };
-    
-    const { toast } = useToast();
-    const [isLoading, setIsLoading] = useState(false);
-    
-    // Use ref to prevent dialog from closing due to re-renders
-    const dialogOpenRef = useRef(false);
 
-    const isFishStall = ['kak', 'ka_sons', 'alif'].includes(butcherId);
+    const rejectDialogState = globalDialogState[order.id]?.rejectDialog || {
+        isOpen: false,
+        reason: ''
+    };
     
+    const itemRejectDialogState = globalDialogState[order.id]?.itemRejectDialog || {
+        isOpen: false,
+        reason: '',
+        itemId: ''
+    };
     
     // Helper function to update dialog state
+    // ✅ FIX: Use functional update and also update ref immediately
     const updateDialogState = (updates: Partial<typeof dialogState>) => {
-        setGlobalDialogState((prev: any) => ({
-            ...prev,
-            [order.id]: {
-                ...dialogState,
+        setGlobalDialogState((prev: any) => {
+            const updatedState = {
+                ...(prev[order.id] || dialogState),  // Use prev state, fallback to current
                 ...updates
-            }
-        }));
+            };
+            // ✅ FIX: Store in ref immediately for synchronous access
+            dialogStateRef.current[order.id] = updatedState;
+            return {
+                ...prev,
+                [order.id]: updatedState
+            };
+        });
     };
 
+    const updateRejectDialogState = (updates: any) => {
+        setGlobalDialogState((prev: any) => {
+            const updatedState = {
+                ...prev[order.id],
+                rejectDialog: {
+                    ...rejectDialogState,
+                    ...updates
+                }
+            };
+            // ✅ FIX: Store in ref immediately for synchronous access
+            dialogStateRef.current[order.id] = {
+                ...(dialogStateRef.current[order.id] || dialogState),
+                ...updatedState
+            };
+            return {
+                ...prev,
+                [order.id]: updatedState
+            };
+        });
+    };
+    
+    const updateItemRejectDialogState = (updates: any) => {
+        setGlobalDialogState((prev: any) => {
+            const updatedState = {
+                ...prev[order.id],
+                itemRejectDialog: {
+                    ...itemRejectDialogState,
+                    ...updates
+                }
+            };
+            // ✅ FIX: Store in ref immediately for synchronous access
+            dialogStateRef.current[order.id] = {
+                ...(dialogStateRef.current[order.id] || dialogState),
+                ...updatedState
+            };
+            return {
+                ...prev,
+                [order.id]: updatedState
+            };
+        });
+    };
 
-    // Get status-specific styling
     const getStatusStyling = () => {
         switch (order.status) {
             case 'new':
                 return {
                     cardClass: "border-l-4 border-blue-500",
                     statusClass: "bg-blue-500 text-white",
-                    icon: PackageCheck,
-                    pulse: false
+                    icon: Clock,
+                    pulse: true
                 };
             case 'preparing':
                 return {
-                    cardClass: "border-l-4 border-yellow-500",
-                    statusClass: "bg-yellow-500 text-white",
-                    icon: CookingPot,
-                    pulse: false
+                    cardClass: "border-l-4 border-orange-500",
+                    statusClass: "bg-orange-500 text-white",
+                    icon: Timer,
+                    pulse: true
                 };
-            case 'completed':
+            case 'prepared':
                 return {
                     cardClass: "border-l-4 border-green-500",
                     statusClass: "bg-green-500 text-white",
                     icon: CheckCircle,
                     pulse: false
                 };
+            case 'completed':
+                return {
+                    cardClass: "border-l-4 border-emerald-500",
+                    statusClass: "bg-emerald-500 text-white",
+                    icon: CheckCircle,
+                    pulse: false
+                };
             case 'rejected':
                 return {
-                    cardClass: "border-l-4 border-red-500",
+                    cardClass: isArchived 
+                        ? "border-l-4 border-red-500 bg-red-950/20 dark:bg-red-900/30 border-red-500/50" 
+                        : "border-l-4 border-red-500",
                     statusClass: "bg-red-500 text-white",
-                    icon: ThumbsDown,
+                    icon: X,
                     pulse: false
                 };
             default:
@@ -375,725 +631,812 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
         }
     };
 
-    // Disable earnings fetching to avoid quota issues since we removed revenue display from new/preparing orders
-    const { earnings, isLoading: earningsLoading, error: earningsError } = useButcherEarnings({
-        butcherId,
-        orderItems: order.items,
-        enabled: false // Disabled to prevent quota exceeded errors
-    });
-    
-
-
     const handleAccept = () => {
         if (isMeatButcher(butcherId)) {
-            // Check if any chicken items need weight dialog
+            // Check if any items need weight dialog (chicken nadan, chicken thigh)
             const needsWeightItems = order.items.filter(item => needsWeightDialog(item.name));
+            const noWeightItems = order.items.filter(item => !needsWeightDialog(item.name));
             
-            if (needsWeightItems.length > 0) {
-                // Meat butchers with chicken items: Need to enter preparation weight
-                
-                dialogOpenRef.current = true;
+            if (needsWeightItems.length > 0 && noWeightItems.length > 0) {
+                // Mixed: items that need weight AND items that don't need weight
+                // Start with items that don't need weight first
+                const firstNoWeightIndex = order.items.findIndex(item => !needsWeightDialog(item.name));
+                setCurrentDialogOrder(order);
+                updateDialogState({
+                    itemAcceptDialog: { isOpen: true, currentIndex: firstNoWeightIndex },
+                    weights: {},
+                    rejectedItems: {},
+                    unit: 'kg',
+                    currentIndex: 0, // This will be used for weight dialog later
+                    isOpen: false // Weight dialog closed initially
+                });
+            } else if (needsWeightItems.length > 0) {
+                // Only items that need weight - open weight dialog
+                const firstNeedsWeightIndex = order.items.findIndex(item => needsWeightDialog(item.name));
                 setCurrentDialogOrder(order);
                 updateDialogState({
                     isOpen: true,
                     weights: {},
+                    rejectedItems: {},
                     unit: 'kg',
-                    currentIndex: 0
+                    currentIndex: firstNeedsWeightIndex >= 0 ? firstNeedsWeightIndex : 0,
+                    itemAcceptDialog: { isOpen: false, currentIndex: 0 }
                 });
             } else {
-                // Meat butchers without chicken items: Directly accept and move to preparing status
-                const updatedOrder: Order = { 
-                ...order, 
-                    status: 'preparing' as const, 
-                preparationStartTime: new Date(),
-                // For meat butchers, use quantities as weights
-                itemQuantities: order.items.reduce((acc, item) => {
-                    acc[item.name] = item.quantity.toString();
-                    return acc;
-                }, {} as {[key: string]: string})
-            };
-            
-                console.log('\n=== MEAT BUTCHER ORDER ACCEPTANCE (NO CHICKEN ITEMS) ===');
-            console.log('Order accepted directly:', {
-                orderId: order.id,
-                status: updatedOrder.status,
-                itemQuantities: updatedOrder.itemQuantities,
-                items: order.items.map(item => ({ name: item.name, quantity: item.quantity }))
-            });
-            console.log('=====================================\n');
-            
-            onUpdate(updatedOrder);
-                // Check if there are still other new orders before stopping alert
-                const remainingNewOrders = allOrders.filter(o => o.status === 'new' && o.id !== order.id);
-                console.log('Meat butcher order accepted:', order.id, '- remaining new orders:', remainingNewOrders.length);
-                if (remainingNewOrders.length === 0 && (window as any).globalStopAlert) {
-                  console.log('No more new orders, stopping alert immediately');
-                  (window as any).globalStopAlert();
-                }
-                // Immediately refetch orders to update UI
-                refetch();
-                toast({ 
-                    title: "Order Accepted", 
-                    description: `${getDisplayOrderId(order.id)} is now being prepared.`,
-                    variant: "success"
+                // Only items that don't need weight - open item accept dialog
+                setCurrentDialogOrder(order);
+                updateDialogState({
+                    itemAcceptDialog: { isOpen: true, currentIndex: 0 },
+                    weights: {},
+                    rejectedItems: {},
+                    unit: 'kg',
+                    currentIndex: 0,
+                    isOpen: false
                 });
             }
         } else {
-            // Fish butchers: Need to enter preparation weight
-            dialogOpenRef.current = true;
+            // Fish butchers: Need to enter preparation weight for all items
             setCurrentDialogOrder(order);
             updateDialogState({
                 isOpen: true,
                 weights: {},
-                unit: 'kg',
-                currentIndex: 0
+                rejectedItems: {},
+                unit: 'kg', // Fish butchers use kg
+                currentIndex: 0,
+                itemAcceptDialog: { isOpen: false, currentIndex: 0 }
             });
+        }
+    };
+
+    const handleItemAccept = () => {
+        // Accept current item (no weight needed), move to next item that doesn't need weight
+        let nextIndex = dialogState.itemAcceptDialog?.currentIndex + 1 || 0;
+        
+        // Find next item that doesn't need weight
+        while (nextIndex < order.items.length && needsWeightDialog(order.items[nextIndex].name)) {
+            nextIndex++;
+        }
+        
+        if (nextIndex < order.items.length) {
+            // Move to next item that doesn't need weight
+            updateDialogState({
+                itemAcceptDialog: {
+                    isOpen: true,
+                    currentIndex: nextIndex
+                }
+            });
+        } else {
+            // All items that don't need weight are processed
+            // Check if there are items that need weight
+            const needsWeightItems = order.items.filter(item => needsWeightDialog(item.name));
+            
+            if (needsWeightItems.length > 0) {
+                // Transition to weight dialog
+                const firstNeedsWeightIndex = order.items.findIndex(item => needsWeightDialog(item.name));
+                updateDialogState({
+                    itemAcceptDialog: { isOpen: false, currentIndex: 0 },
+                    isOpen: true,
+                    currentIndex: firstNeedsWeightIndex >= 0 ? firstNeedsWeightIndex : 0
+                });
+            } else {
+                // All items processed, submit the response
+                handleSubmitResponse();
+                updateDialogState({ 
+                    itemAcceptDialog: { isOpen: false, currentIndex: 0 },
+                    isOpen: false 
+                });
+            }
+        }
+    };
+    
+    const handleItemReject = () => {
+        // Read from itemRejectDialogState (same source the dialog reads from)
+        if (!itemRejectDialogState.reason.trim()) {
+            toast({
+                variant: "destructive",
+                title: "Reason Required",
+                description: "Please provide a reason for rejecting this item."
+            });
+            return;
+        }
+        
+        // ✅ FIX: Store rejection using functional update and ref immediately
+        setGlobalDialogState((prev: any) => {
+            const currentState = prev[order.id] || dialogState;
+            const updatedState = {
+                ...currentState,
+                rejectedItems: {
+                    ...currentState.rejectedItems,
+                    [itemRejectDialogState.itemId]: itemRejectDialogState.reason
+                }
+            };
+            // ✅ FIX: Store in ref immediately for synchronous access
+            dialogStateRef.current[order.id] = updatedState;
+            return {
+                ...prev,
+                [order.id]: updatedState
+            };
+        });
+        
+        // Close dialog using the correct updater (same one the dialog component uses)
+        updateItemRejectDialogState({
+            isOpen: false,
+            reason: '',
+            itemId: ''
+        });
+        
+        // Determine which dialog we're in and find next item accordingly
+        const isInItemAcceptDialog = dialogState.itemAcceptDialog?.isOpen || false;
+        let nextIndex: number;
+        
+        if (isInItemAcceptDialog) {
+            // In item accept dialog - find next item that doesn't need weight
+            nextIndex = (dialogState.itemAcceptDialog?.currentIndex || 0) + 1;
+            while (nextIndex < order.items.length && needsWeightDialog(order.items[nextIndex].name)) {
+                nextIndex++;
+            }
+            
+            if (nextIndex < order.items.length) {
+                updateDialogState({
+                    itemAcceptDialog: {
+                        isOpen: true,
+                        currentIndex: nextIndex
+                    }
+                });
+            } else {
+                // All items that don't need weight processed, check for weight items
+                const needsWeightItems = order.items.filter(item => needsWeightDialog(item.name));
+                if (needsWeightItems.length > 0) {
+                    const firstNeedsWeightIndex = order.items.findIndex(item => needsWeightDialog(item.name));
+                    updateDialogState({
+                        itemAcceptDialog: { isOpen: false, currentIndex: 0 },
+                        isOpen: true,
+                        currentIndex: firstNeedsWeightIndex >= 0 ? firstNeedsWeightIndex : 0
+                    });
+                } else {
+                    handleSubmitResponse();
+                    updateDialogState({ 
+                        itemAcceptDialog: { isOpen: false, currentIndex: 0 },
+                        isOpen: false 
+                    });
+                }
+            }
+        } else {
+            // In weight dialog - find next item that needs weight
+            nextIndex = dialogState.currentIndex + 1;
+            if (isMeatButcher(butcherId)) {
+                while (nextIndex < order.items.length && !needsWeightDialog(order.items[nextIndex].name)) {
+                    nextIndex++;
+                }
+            }
+            
+            if (nextIndex < order.items.length) {
+                updateDialogState({
+                    currentIndex: nextIndex
+                });
+            } else {
+                handleSubmitResponse();
+                updateDialogState({ isOpen: false });
+            }
         }
     };
 
     const handlePickedWeightSubmit = () => {
         const currentItem = order.items[dialogState.currentIndex];
         if (!currentItem) {
-            console.error('No current item found at index:', dialogState.currentIndex);
             return;
-        }
-        
-        const currentWeight = dialogState.weights[currentItem.name] || '';
-        let weight = parseFloat(currentWeight);
-        
-        if (isNaN(weight) || weight <= 0) {
-            toast({ 
-                variant: "destructive", 
-                title: "Validation Error", 
-                description: `Please enter a valid picked weight for ${currentItem.name}.` 
-            });
-            return;
-        }
-        
-        // Validate reasonable weight limits (prevent data entry errors)
-        if (weight > 100) {
-            toast({ 
-                variant: "destructive", 
-                title: "Weight Too High", 
-                description: `Weight ${weight}kg seems too high. Please check if you meant ${(weight/1000).toFixed(3)}kg or ${weight/1000}kg?` 
-            });
-            return;
-        }
-        
-        // Convert to kg if needed
-        if (dialogState.unit === 'g') {
-            weight = weight / 1000;
         }
 
-        // Update the weights object
-        const newWeights = { ...dialogState.weights, [currentItem.name]: weight.toString() };
-
-        // Check if we have weights for all items
-        if (dialogState.currentIndex < order.items.length - 1) {
-            // Move to next item
-            updateDialogState({
-                weights: newWeights,
-                currentIndex: dialogState.currentIndex + 1
-            });
-            toast({ 
-                title: "Weight Saved", 
-                description: `Weight for ${currentItem.name} saved. Moving to next item.`,
-                variant: "default"
-            });
-        } else {
-            // All weights collected, update the order
-            const totalPickedWeight = Object.values(newWeights).reduce((sum: number, w) => sum + parseFloat(w as string), 0);
+        // Check if item needs weight (always required when dialog is shown)
+        const needsWeight = needsWeightDialog(currentItem.name) || !isMeatButcher(butcherId);
+        
+        if (needsWeight) {
+        const weight = dialogState.weights[currentItem.name];
+            const unit = dialogState.unit || (currentItem.unit === 'nos' ? 'nos' : 'kg');
             
-            
-            const updatedOrder: Order = { 
-                ...order, 
-                status: 'preparing' as const, 
-                preparationStartTime: new Date(), 
-                pickedWeight: totalPickedWeight as number // Update pickedWeight to reflect custom entered weights
-            };
-            
-            // Store weights differently based on butcher type
-            if (isMeatButcher(butcherId)) {
-                // Meat butchers: Store in itemQuantities
-                updatedOrder.itemQuantities = newWeights;
-            } else {
-                // Fish butchers: Store in itemWeights
-                updatedOrder.itemWeights = newWeights;
+            if (!weight || weight.trim() === '') {
+                toast({
+                    variant: "destructive",
+                    title: "Required",
+                    description: unit === 'nos' ? "Please enter quantity." : "Please enter weight."
+                });
+                return;
             }
             
-            console.log('Final updatedOrder before onUpdate:', {
-                id: updatedOrder.id,
-                status: updatedOrder.status,
-                pickedWeight: updatedOrder.pickedWeight,
-                itemQuantities: updatedOrder.itemQuantities,
-                itemWeights: updatedOrder.itemWeights,
-                butcherId: butcherId
+            // Validate based on unit
+            if (unit === 'nos') {
+                const num = parseInt(weight);
+                if (isNaN(num) || num < 1 || num % 1 !== 0) {
+                    toast({
+                        variant: "destructive",
+                        title: "Invalid Quantity",
+                        description: "Please enter a valid weight"
+                    });
+                    return;
+                }
+            } else {
+                const num = parseFloat(weight);
+                if (isNaN(num) || num <= 0) {
+            toast({
+                variant: "destructive",
+                title: "Invalid Weight",
+                description: "Please enter a valid weight."
             });
-            
-            console.log('Updated order:', {
-                id: updatedOrder.id,
-                status: updatedOrder.status,
-                itemQuantities: updatedOrder.itemQuantities,
-                itemWeights: updatedOrder.itemWeights,
-                pickedWeight: updatedOrder.pickedWeight
-            });
-            console.log('=====================================\n');
-            
-            // Close dialog first to prevent any race conditions
-            dialogOpenRef.current = false;
-            setCurrentDialogOrder(null);
+            return;
+        }
+            }
+        }
+
+        // Find next item that needs weight, or move to next item
+        let nextIndex = dialogState.currentIndex + 1;
+        
+        if (isMeatButcher(butcherId)) {
+            // For meat butchers, skip to next item that needs weight
+            while (nextIndex < order.items.length && !needsWeightDialog(order.items[nextIndex].name)) {
+                nextIndex++;
+            }
+        }
+        
+        if (nextIndex < order.items.length) {
+            // Move to next item (or next item that needs weight)
             updateDialogState({
-                isOpen: false,
-                weights: {},
-                unit: 'kg',
-                currentIndex: 0
+                currentIndex: nextIndex
+            });
+        } else {
+            // All items processed, submit the response
+            handleSubmitResponse();
+            updateDialogState({ isOpen: false });
+        }
+    };
+
+    const handleSubmitResponse = async () => {
+        // Race condition protection: prevent duplicate operations
+        if (pendingOperations.has(order.id)) {
+            return;
+        }
+
+        // Mark as pending
+        setPendingOperations(prev => new Set(prev).add(order.id));
+        setIsLoading(true);
+
+        // ✅ FIX: Read from ref first (latest state), then fallback to global state
+        // This ensures we get the most recent rejections even if state update hasn't propagated
+        const currentDialogState = dialogStateRef.current[order.id] || globalDialogState[order.id] || dialogState;
+
+        // ✅ FIX: Check if all items are rejected and include preparing weights
+        const updatedItems = order.items.map(item => {
+            const rejected = currentDialogState.rejectedItems[item.id];
+            if (rejected) {
+                return { ...item, rejected };  // Include rejection in optimistic update
+            }
+            // ✅ FIX: Include preparing weight on item for immediate display
+            const weight = currentDialogState.weights[item.name];
+            const unit = currentDialogState.unit || (item.unit === 'nos' ? 'nos' : 'kg');
+            const needsWeight = needsWeightDialog(item.name) || !isMeatButcher(butcherId);
+            
+            if (needsWeight && weight) {
+                return {
+                    ...item,
+                    preparingWeight: `${weight}${unit}` as any  // Include preparing weight
+                };
+            } else if (!needsWeight) {
+                // Item doesn't need weight - use original quantity as preparing weight
+                return {
+                    ...item,
+                    preparingWeight: `${item.quantity}${item.unit}` as any
+                };
+            }
+            return item;
+        });
+        
+        // ✅ FIX: Build itemWeights/itemQuantities for order-level display
+        const itemWeights: {[itemName: string]: string} = {};
+        const itemQuantities: {[itemName: string]: string} = {};
+        
+        order.items.forEach(item => {
+            const rejected = currentDialogState.rejectedItems[item.id];
+            if (!rejected) {
+                const weight = currentDialogState.weights[item.name];
+                const unit = currentDialogState.unit || (item.unit === 'nos' ? 'nos' : 'kg');
+                const needsWeight = needsWeightDialog(item.name) || !isMeatButcher(butcherId);
+                
+                if (needsWeight && weight) {
+                    const weightStr = `${weight}${unit}`;
+                    if (isMeatButcher(butcherId)) {
+                        itemQuantities[item.name] = weightStr;
+                    } else {
+                        itemWeights[item.name] = weightStr;
+                    }
+                } else if (!needsWeight) {
+                    const weightStr = `${item.quantity}${item.unit}`;
+                    if (isMeatButcher(butcherId)) {
+                        itemQuantities[item.name] = weightStr;
+                    } else {
+                        itemWeights[item.name] = weightStr;
+                    }
+                }
+            }
+        });
+        
+        const allItemsRejected = updatedItems.every(item => (item as any).rejected);
+        const rejectionReason = allItemsRejected && updatedItems.length > 0 
+            ? (updatedItems[0] as any).rejected 
+            : undefined;
+
+        // ✅ FIX: Determine order status based on whether all items are rejected
+        const orderStatus: 'preparing' | 'rejected' = allItemsRejected ? 'rejected' : 'preparing';
+        
+        // ✅ FIX: Optimistic update with correct status AND preparing weights
+        const optimisticOrder: Order = {
+            ...order,
+            status: orderStatus,
+            ...(allItemsRejected && rejectionReason ? { rejectionReason } : {}),
+            ...(orderStatus === 'preparing' ? { preparationStartTime: new Date() } : {}),
+            items: updatedItems,
+            // ✅ FIX: Include itemWeights/itemQuantities for immediate display
+            ...(isMeatButcher(butcherId) 
+                ? { itemQuantities: { ...order.itemQuantities, ...itemQuantities } }
+                : { itemWeights: { ...order.itemWeights, ...itemWeights } })
+        };
+        
+        // ✅ FIX: Set optimistic transition FIRST and force immediate re-render
+        // Use flushSync to ensure state update happens synchronously and triggers immediate re-render
+        flushSync(() => {
+            setOptimisticTransitions((prev: any) => ({
+                ...prev,
+                [order.id]: {
+                    originalStatus: order.status,
+                    targetStatus: orderStatus,  // Use determined status (rejected or preparing)
+                    order: optimisticOrder
+                }
+            }));
+        });
+        
+        // ✅ FIX: Remove loading immediately - UI updates instantly via optimistic transition
+        setIsLoading(false);
+        
+        // ✅ FIX: Don't call onUpdate - it overwrites optimistic transitions
+        // Optimistic transitions handle UI updates, SSE will confirm later
+        // onUpdate(optimisticOrder) - REMOVED to prevent overwriting optimistic state
+        
+        try {
+            // Extract order number from order ID (ORD-123 -> 123 or ORD-2025-01-15-123 -> 123)
+            const orderIdParts = order.id.replace('ORD-', '').split('-');
+            const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10);
+            
+            if (isNaN(orderNo)) {
+                throw new Error('Invalid order number');
+            }
+            
+            // ✅ FIX: Prepare response items using current state (not stale closure)
+            const responseItems = order.items.map(item => {
+                const rejected = currentDialogState.rejectedItems[item.id];
+                if (rejected) {
+                    return {
+                        itemId: item.id,
+                        rejected: rejected
+                    };
+                } else {
+                    // Item accepted - get preparing weight
+                    // ✅ FIX: Read from current state
+                    const weight = currentDialogState.weights[item.name];
+                    const unit = currentDialogState.unit || (item.unit === 'nos' ? 'nos' : 'kg');
+                    const needsWeight = needsWeightDialog(item.name) || !isMeatButcher(butcherId);
+                    
+                    if (needsWeight && weight) {
+                        // Item needs weight and weight was entered
+                        return {
+                            itemId: item.id,
+                            preparingWeight: `${weight}${unit}`
+                        };
+                    } else {
+                        // Item accepted but doesn't need weight - use original order quantity
+                        return {
+                            itemId: item.id,
+                            preparingWeight: `${item.quantity}${item.unit}`
+                        };
+                    }
+                }
             });
             
-            // Update order
-            onUpdate(updatedOrder);
+            // ✅ FIX: Validation - ensure we have response for all items
+            if (responseItems.length !== order.items.length) {
+                throw new Error('Failed to process all items. Please try again.');
+            }
             
-            // Show success message
-            toast({ 
-                title: "Order Accepted", 
-                description: `${getDisplayOrderId(order.id)} is now being prepared with total weight ${(totalPickedWeight as number).toFixed(2)}kg.`,
-                variant: "default"
+            // Get JWT token
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                throw new Error('Not authenticated');
+            }
+            
+            // Send response to Central API
+            const response = await fetch('/api/orders/respond', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    orderNo,
+                    items: responseItems
+                })
             });
             
-            // Refetch orders and check for remaining new orders
-            setTimeout(async () => {
-                await refetch();
-                // Global alert system will handle stopping when newOrders.length becomes 0
-            }, 100);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || 'Failed to submit order response');
+            }
+            
+            const result = await response.json();
+            
+            // ✅ FIX: Don't call onUpdate - SSE will update automatically
+            // The server response will come via SSE and update the cache
+            // We just need to remove from optimistic transitions
+            
+            // Remove from optimistic transitions (skeleton will be replaced by real order from SSE)
+            setOptimisticTransitions((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+            
+            toast({
+                title: "Order Accepted",
+                description: `Order accepted successfully. ${result.warning}`,
+                variant: result.warning ? "default" : "default"
+            });
+            
+            // ✅ FIX: Don't call refetch() - SSE will update automatically
+            // The optimistic update already shows the change instantly
+            
+            // Clear all dialog state after successful submission
+            setGlobalDialogState((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+            setCurrentDialogOrder(null);
+            
+        } catch (error: any) {
+            
+            // Revert optimistic update on error - remove from transitions and restore original status
+            setOptimisticTransitions((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+            
+            const revertedOrder: Order = {
+                ...order,
+                status: 'new',
+                preparationStartTime: undefined
+            };
+            
+            try {
+                await onUpdate(revertedOrder);
+            } catch (revertError) {
+                // ✅ FIX: Don't call refetch() - SSE will update automatically
+            }
+            
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: error.message || "Failed to submit order response. Please try again."
+            });
+        } finally {
+            // Remove from pending operations
+            setPendingOperations(prev => {
+                const next = new Set(prev);
+                next.delete(order.id);
+                return next;
+            });
+            setIsLoading(false);
         }
     };
 
     const handleReject = () => {
-        setGlobalDialogState((prev: any) => ({
-            ...prev,
-            [order.id]: {
-                ...prev[order.id],
-                rejectDialog: { isOpen: true, reason: '' }
-            }
-        }));
+        updateRejectDialogState({
+            isOpen: true,
+            reason: ''
+        });
     };
-    
 
-    const handlePrepared = async (preparingWeightsData: {[itemName: string]: string}) => {
+    const handleRejectConfirm = async () => {
+        // Race condition protection
+        if (pendingOperations.has(order.id)) {
+            return;
+        }
+
+        const rejectionReason = rejectDialogState.reason;
+        if (!rejectionReason.trim()) {
+            toast({ 
+                variant: "destructive", 
+                title: "Reason Required", 
+                description: "Please provide a reason for declining this order." 
+            });
+            return;
+        }
+
+        // Mark as pending
+        setPendingOperations(prev => new Set(prev).add(order.id));
         setIsLoading(true);
 
-        console.log('\n=== HANDLE PREPARED DEBUG ===');
-        console.log('Received preparingWeightsData:', preparingWeightsData);
-        console.log('Order itemQuantities:', order.itemQuantities);
-        console.log('Order itemWeights:', order.itemWeights);
-        console.log('Butcher type:', isMeatButcher(butcherId) ? 'meat' : 'fish');
-        console.log('=====================================\n');
+        // ✅ FIX: Optimistic update with rejected status
+        const optimisticOrder: Order = {
+                ...order,
+            status: 'rejected',
+            rejectionReason: rejectionReason.trim(),
+            items: order.items.map(item => ({
+                ...item,
+                rejected: rejectionReason.trim()  // Mark all items as rejected
+            }))
+        };
 
-        // Calculate total preparing weight and revenue
-        const totalPreparingWeight = Object.values(preparingWeightsData).reduce((sum, w) => sum + parseFloat(w), 0);
-        
-        // Calculate revenue based on purchase prices from menu pos sheet
-        // Formula: (Purchase Price × Weight) - Commission% of (Purchase Price × Weight)
-        let totalRevenue = 0;
-        const itemRevenues: {[itemName: string]: number} = {};
-        
-        // Load custom rates from Google Sheets
-        const customRates = await getRatesFromSheet();
-        const butcherCustomRates = customRates.find(r => r.butcherId === butcherId);
-        console.log('Loaded custom rates for butcher:', butcherId, butcherCustomRates);
-        
+        // ✅ FIX: Set optimistic transition FIRST and force immediate re-render
+        flushSync(() => {
+            setOptimisticTransitions((prev: any) => ({
+                ...prev,
+                [order.id]: {
+                    originalStatus: order.status,
+                    targetStatus: 'rejected',
+                    order: optimisticOrder
+                }
+            }));
+        });
+
+        // ✅ FIX: Close dialog immediately
+        updateRejectDialogState({
+            isOpen: false,
+            reason: ''
+        });
+
+        // ✅ FIX: Remove loading immediately - UI updates instantly via optimistic transition
+        setIsLoading(false);
+
+        // ✅ FIX: Update local state optimistically (fire-and-forget, don't await)
+        onUpdate(optimisticOrder).catch(err => {
+            // Ignore errors from optimistic update - refetch will handle it
+        });
+
         try {
-            // Fetch actual purchase prices from Menu POS sheet via API
-            const itemNames = Object.keys(preparingWeightsData);
-            const orderItemsParam = encodeURIComponent(JSON.stringify(order.items));
-            console.log('Fetching purchase prices for items:', itemNames);
-            console.log('Order items:', order.items);
+            // Extract order number for rejection
+            const orderIdParts = order.id.replace('ORD-', '').split('-');
+            const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10);
             
-            const response = await fetch(`/api/purchase-prices/${butcherId}?items=${itemNames.join(',')}&orderItems=${orderItemsParam}`, {
-                method: 'GET',
+            if (isNaN(orderNo)) {
+                throw new Error('Invalid order number');
+            }
+
+            // Prepare rejection response for all items
+            const responseItems = order.items.map(item => ({
+                itemId: item.id,
+                rejected: rejectionReason.trim()
+            }));
+
+            // Get JWT token
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                throw new Error('Not authenticated');
+            }
+
+            // Send rejection to Central API
+            const response = await fetch('/api/orders/respond', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    orderNo,
+                    items: responseItems
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || 'Failed to reject order');
+            }
+
+            const result = await response.json();
+            
+            // ✅ FIX: Don't call onUpdate - SSE will update automatically
+            // The server response will come via SSE and update the cache
+            // We just need to remove from optimistic transitions
+            
+            toast({
+                title: "Order Rejected",
+                description: `${getDisplayOrderId(order.id)} has been rejected successfully.`
+            });
+            
+            // ✅ FIX: Remove from optimistic transitions (skeleton will be replaced by real order)
+            setOptimisticTransitions((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+
+            // Clear all dialog state after successful rejection
+            setGlobalDialogState((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+            setCurrentDialogOrder(null);
+        } catch (error: any) {
+            
+            // ✅ FIX: Revert optimistic update on error
+            setOptimisticTransitions((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+            
+            const revertedOrder: Order = {
+                ...order,
+                status: 'new',
+                rejectionReason: undefined
+            };
+            
+            try {
+                await onUpdate(revertedOrder);
+            } catch (revertError) {
+                // ✅ FIX: Don't call refetch() - SSE will update automatically
+            }
+            
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: error.message || "Failed to reject order. Please try again."
+            });
+        } finally {
+            // Remove from pending operations
+            setPendingOperations(prev => {
+                const next = new Set(prev);
+                next.delete(order.id);
+                return next;
+            });
+            // ✅ FIX: isLoading already set to false after optimistic update
+            // Only set to false here if we haven't already (error case)
+            if (isLoading) {
+                setIsLoading(false);
+            }
+        }
+    };
+
+    // Handle marking order as completed (prepared)
+    const handlePrepared = async (preparingWeightsData: {[itemName: string]: string}) => {
+        // Race condition protection
+        if (pendingOperations.has(order.id)) {
+            return;
+        }
+
+        // Mark as pending
+        setPendingOperations(prev => new Set(prev).add(order.id));
+        setIsLoading(true);
+
+        // ✅ FIX: Optimistic update with preparing weights and revenue placeholder
+        // Revenue will be calculated by server, but we include weights immediately
+        const optimisticOrder: Order = {
+            ...order,
+            status: 'completed',
+            completionTime: Date.now(),
+            // ✅ FIX: Include preparing weights immediately for display
+            ...(isMeatButcher(butcherId) 
+                ? { itemQuantities: { ...order.itemQuantities, ...preparingWeightsData } }
+                : { itemWeights: { ...order.itemWeights, ...preparingWeightsData } })
+            // Note: Revenue will be calculated by server and come via SSE
+        };
+        
+        // ✅ FIX: Mark order as in optimistic transition and force immediate re-render
+        flushSync(() => {
+            setOptimisticTransitions((prev: any) => ({
+                ...prev,
+                [order.id]: {
+                    originalStatus: order.status,
+                    targetStatus: 'completed',
+                    order: optimisticOrder
+                }
+            }));
+        });
+        
+        // ✅ FIX: Remove loading immediately - UI updates instantly via optimistic transition
+        setIsLoading(false);
+        
+        // ✅ FIX: Don't call onUpdate - it overwrites optimistic transitions
+        // Optimistic transitions handle UI updates, SSE will confirm later
+        // onUpdate(optimisticOrder) - REMOVED to prevent overwriting optimistic state
+
+        try {
+            // Preserve existing itemWeights/itemQuantities based on butcher type
+            const orderWithWeights = {
+                ...order,
+                ...(isMeatButcher(butcherId) 
+                    ? { itemQuantities: preparingWeightsData }
+                    : { itemWeights: preparingWeightsData })
+            };
+
+            const response = await fetch('/api/complete-order', {
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                body: JSON.stringify({
+                    order: orderWithWeights,
+                    butcherId: butcherId
+                })
+            });
+
+            if (!response.ok) {
+                let errorData: any = {};
+                try {
+                    const text = await response.text();
+                    if (text) {
+                        errorData = JSON.parse(text);
+                    }
+                } catch (parseError) {
+                }
+                
+                const errorMessage = errorData.message || errorData.details || errorData.error || `Failed to complete order: ${response.statusText || 'Unknown error'}`;
+                throw new Error(errorMessage);
+            }
+
+            const result = await response.json();
+
+            // ✅ FIX: Don't call onUpdate - SSE will update automatically
+            // The server response will come via SSE and update the cache
+            // We just need to remove from optimistic transitions
+            
+            // Remove from optimistic transitions (skeleton will be replaced by real order from SSE)
+            setOptimisticTransitions((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
+            });
+
+            // ✅ FIX: Don't call refetch() - SSE will update automatically
+            // The optimistic update already shows the change instantly
+
+            toast({
+                title: "Order Completed!",
+                description: `Order ${getDisplayOrderId(order.id)} has been marked as completed!`,
+                variant: "default"
+            });
+
+        } catch (error: any) {
+            
+            // Revert optimistic update on error
+            setOptimisticTransitions((prev: any) => {
+                const next = { ...prev };
+                delete next[order.id];
+                return next;
             });
             
-            if (response.ok) {
-                const data = await response.json();
-                const prices = data.prices || {};
-        console.log('\n=== REVENUE CALCULATION DEBUG ===');
-                console.log('API Response:', data);
-                console.log('Prices received from API:', prices);
-                console.log('Number of prices received:', Object.keys(prices).length);
-                console.log('Price keys:', Object.keys(prices));
-        console.log('Order details:', {
-            orderId: order.id,
-            orderStatus: order.status,
-            orderItemWeights: order.itemWeights,
-            orderPickedWeight: order.pickedWeight,
-            orderItems: order.items.map(item => ({ name: item.name, quantity: item.quantity }))
-        });
-        console.log('Fetched purchase prices from sheet:', {
-            prices,
-            itemNames: Object.keys(preparingWeightsData),
-            butcherId,
-            responseData: data,
-            preparingWeightsData
-        });
-                
-                // Calculate revenue using actual purchase prices from sheet with size consideration
-                Object.entries(preparingWeightsData).forEach(([itemName, itemWeight]) => {
-                    const orderItem = order.items.find(item => item.name === itemName);
-                    if (orderItem) {
-                        // Enhanced item name matching for purchase price lookup
-                        let lookupName = itemName;
-                        if (isFishButcher(butcherId) && itemName.includes(' - ')) {
-                            const nameParts = itemName.split(' - ');
-                            if (nameParts.length >= 3) {
-                                lookupName = nameParts[1].trim(); // Use English name for lookup
-                            }
-                        }
-                        
-                        // For fish butchers' meat category items, add "meat" suffix
-                        const itemCategoryForLookup = orderItem.category || '';
-                        const isMeatCategoryItem = isFishButcher(butcherId) && itemCategoryForLookup.toLowerCase().includes('meat');
-                        
-                        // Get size information from order item
-                        const orderItemSize = orderItem.size?.toLowerCase().trim() || 'default';
-                        
-                        // Case-sensitive matching for exact item names in menu POS sheet with size consideration
-                        let purchasePrice = 450; // Default fallback
-                        let matchedKey = 'none';
-                        
-                        if (isMeatButcher(butcherId)) {
-                            // Meat butchers: Case-sensitive exact matching (no size consideration)
-                            if (prices[itemName] && prices[itemName] > 0) {
-                                purchasePrice = prices[itemName];
-                                matchedKey = itemName;
-                            }
-                        } else {
-                            // Fish butchers: Enhanced matching with size consideration
-                            // First, try exact case-sensitive match with English name and size
-                            if (orderItemSize && orderItemSize !== 'default') {
-                                const keyWithSize = `${lookupName} (${orderItemSize})`;
-                                if (prices[keyWithSize] && prices[keyWithSize] > 0) {
-                                    purchasePrice = prices[keyWithSize];
-                                    matchedKey = keyWithSize;
-                                }
-                            }
-                            
-                            // If no size-specific match, try without size
-                            if (matchedKey === 'none') {
-                            if (prices[lookupName] && prices[lookupName] > 0) {
-                                purchasePrice = prices[lookupName];
-                                matchedKey = lookupName;
-                            }
-                            // If meat category item, try with "meat" suffix (case-sensitive)
-                            else if (isMeatCategoryItem && prices[`${lookupName} meat`] && prices[`${lookupName} meat`] > 0) {
-                                purchasePrice = prices[`${lookupName} meat`];
-                                matchedKey = `${lookupName} meat`;
-                            }
-                            // Try original item name (case-sensitive)
-                            else if (prices[itemName] && prices[itemName] > 0) {
-                                purchasePrice = prices[itemName];
-                                matchedKey = itemName;
-                            }
-                            // If meat category item, try original name with "meat" suffix (case-sensitive)
-                            else if (isMeatCategoryItem && prices[`${itemName} meat`] && prices[`${itemName} meat`] > 0) {
-                                purchasePrice = prices[`${itemName} meat`];
-                                matchedKey = `${itemName} meat`;
-                                }
-                            }
-                        }
-                        
-                        // Debug logging for price matching
-                        console.log(`Price lookup for ${itemName}:`, {
-                            itemName,
-                            lookupName,
-                            itemCategory: itemCategoryForLookup,
-                            orderItemSize,
-                            isMeatCategoryItem,
-                            matchedKey,
-                            matchedPrice: purchasePrice,
-                            allPrices: prices,
-                            availableKeys: Object.keys(prices)
-                        });
-                        
-                        // Check for duplicate items (like Vatta in both sea water and meat)
-                        const duplicateItems = Object.keys(prices).filter(key => 
-                            key.toLowerCase().includes('trevally') || 
-                            key.toLowerCase().includes('vatta') ||
-                            key.toLowerCase().includes('sravu') ||
-                            key.toLowerCase().includes('kera')
-                        );
-                        
-                        console.log(`Price lookup for ${itemName}:`, {
-                            itemName,
-                            lookupName,
-                            itemCategory: itemCategoryForLookup,
-                            isFishButcher: isFishButcher(butcherId),
-                            fullName: isFishButcher(butcherId) ? getFishItemFullName(itemName) : 'N/A',
-                            matchedKey,
-                            matchedPrice: purchasePrice,
-                            duplicateItems,
-                            allPrices: prices,
-                            availableKeys: Object.keys(prices),
-                            isUsingFallback: purchasePrice === 450
-                        });
-                        
-                        // Use preparing weight for all items
-                        const weight = parseFloat(itemWeight);
-                        
-                        // Get commission rate for this item's category (using custom rates from Google Sheets)
-                        const commissionCategory = orderItem.category || 'default';
-                        const commission = getCommissionRate(butcherId, commissionCategory, butcherCustomRates?.commissionRates);
-                        
-                        // Revenue calculation formula: (preparing weight × purchase price) - commission rate
-                        // This works for both kg and nos units
-                        const totalPrice = weight * purchasePrice; // Total price before commission
-                        const commissionAmount = totalPrice * commission; // Commission amount
-                        const itemRevenue = totalPrice - commissionAmount; // Final revenue for butcher
-                        
-                        // Debug logging for unit handling
-                        console.log(`Unit handling for ${itemName}:`, {
-                            itemName,
-                            weight,
-                            unit: orderItem.unit,
-                            purchasePrice,
-                            totalPrice,
-                            commission,
-                            commissionAmount,
-                            itemRevenue,
-                            calculation: `${weight} ${orderItem.unit} × ₹${purchasePrice} = ₹${totalPrice} - ₹${commissionAmount} = ₹${itemRevenue}`
-                        });
-                        
-                        // Debug: Check if this makes sense
-                        if (order.id === 'ORD-10') {
-                            console.log(`\n🔍 ORDER 10 REVENUE CALCULATION CHECK:`);
-                            console.log(`- Item Name: ${itemName}`);
-                            console.log(`- Lookup Name: ${lookupName}`);
-                            console.log(`- Item Category: ${itemCategoryForLookup}`);
-                            console.log(`- Matched Key: ${matchedKey}`);
-                            console.log(`- Purchase Price: ${purchasePrice} (per kg)`);
-                            console.log(`- Weight: ${weight} kg`);
-                            console.log(`- Total Price: ${totalPrice} (total price before commission)`);
-                            console.log(`- Commission: ${commission * 100}%`);
-                            console.log(`- Butcher Revenue: ${itemRevenue}`);
-                            console.log(`- If selling price is 440, then:`);
-                            console.log(`  - Either purchase price should be ${440/weight} per kg`);
-                            console.log(`  - Or weight should be ${440/purchasePrice} kg`);
-                            console.log(`  - Or we're using wrong purchase price`);
-                            console.log(`- Duplicate items found:`, duplicateItems);
-                            console.log(`- All available prices:`, Object.keys(prices));
-                            console.log(`- This might be a duplicate item issue (Vatta in both sea water and meat)`);
-                            console.log(`- With the new "meat" suffix solution, this should be resolved!`);
-                            console.log(`🔍 END CHECK\n`);
-                        }
-                        
-                        console.log(`Revenue calculation for ${itemName}:`, {
-                            purchasePrice,
-                            weight,
-                            totalPrice,
-                            commission,
-                            commissionAmount,
-                            itemRevenue,
-                            butcherId: butcherId,
-                            commissionRate: commission,
-                            unit: orderItem.unit,
-                            calculation: `${weight} × ${purchasePrice} = ${totalPrice} - ${commissionAmount} = ${itemRevenue}`,
-                            stepByStep: {
-                                step1: `${weight} × ${purchasePrice} = ${totalPrice} (total price)`,
-                                step2: `${totalPrice} × ${commission} = ${commissionAmount} (commission amount)`,
-                                step3: `${totalPrice} - ${commissionAmount} = ${itemRevenue} (butcher's revenue)`
-                            },
-                            expectedTotalPrice: totalPrice,
-                            expectedButcherRevenue: itemRevenue
-                        });
-                        
-                        // Special debugging for Order 10 and 11
-                        if (order.id === 'ORD-10' || order.id === 'ORD-11') {
-                            console.log(`\n🚨 REVENUE ISSUE DEBUG for Order ${order.id} 🚨`);
-                            console.log('Expected selling price: 440');
-                            console.log('Current revenue showing: 459');
-                            console.log('This is WRONG - revenue should be LESS than selling price!');
-                            console.log('Debugging calculation:');
-                            console.log(`- Purchase Price: ${purchasePrice}`);
-                            console.log(`- Weight: ${weight}`);
-                            console.log(`- Total Price: ${totalPrice}`);
-                            console.log(`- Commission Rate: ${commission} (${commission * 100}%)`);
-                            console.log(`- Commission Amount: ${commissionAmount}`);
-                            console.log(`- Butcher Revenue: ${itemRevenue}`);
-                            console.log(`- Expected: If selling price is 440, butcher revenue should be ~${440 * (1 - commission)}`);
-                            console.log('🚨 END DEBUG 🚨\n');
-                            console.log(`=== ORDER ${order.id} SPECIAL DEBUG ===`);
-                            console.log(`Order ${order.id} details:`, {
-                                orderId: order.id,
-                                itemName,
-                                purchasePrice: purchasePrice.toString(),
-                                weight: weight.toString(),
-                                totalValue: (purchasePrice * weight).toString(),
-                                commission: commission.toString(),
-                                calculatedRevenue: ((purchasePrice * weight) * (1 - commission)).toString(),
-                                expectedCalculation: {
-                                    step1: '229 × 1.5 = 343.50',
-                                    step2: '343.50 × 0.10 = 34.35 (commission)',
-                                    step3: '343.50 - 34.35 = 309.15 (final revenue)'
-                                }
-                            });
-                            console.log('==============================');
-                        }
-                        
-                        // Special debugging for Order 20
-                        if (order.id === 'ORD-20') {
-                            console.log('=== ORDER 20 SPECIAL DEBUG ===');
-                            console.log('Order 20 details:', {
-                                orderId: order.id,
-                                itemName,
-                                purchasePrice: purchasePrice.toString(),
-                                weight: weight.toString(),
-                                totalValue: (purchasePrice * weight).toString(),
-                                commission: commission.toString(),
-                                calculatedRevenue: ((purchasePrice * weight) * (1 - commission)).toString(),
-                                expectedPrices: {
-                                    'chicken breast boneless': 389,
-                                    'chicken leg': 259
-                                },
-                                allPrices: prices
-                            });
-                            console.log('==============================');
-                        }
-                        
-                        itemRevenues[itemName] = itemRevenue;
-                        totalRevenue += itemRevenue;
-                    }
-                });
-            } else {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('API response not ok:', {
-                    status: response.status,
-                    statusText: response.statusText,
-                    errorData
-                });
-                throw new Error(`Failed to fetch purchase prices: ${response.status} ${response.statusText}`);
-            }
-        } catch (error) {
-            console.error('Error fetching purchase prices, using fallback:', error);
+            const revertedOrder: Order = {
+                ...order,
+                status: 'preparing',
+                completionTime: undefined
+            };
             
-            // Only run fallback if no revenue was calculated in the main loop
-            if (totalRevenue === 0) {
-                console.log('No revenue calculated in main loop, using fallback calculation');
-                
-                // Fallback calculation using default prices
-                Object.entries(preparingWeightsData).forEach(([itemName, itemWeight]) => {
-                    const orderItem = order.items.find(item => item.name === itemName);
-                    
-                    // For fish butchers, extract English name for consistency
-                    let lookupName = itemName;
-                    if (isFishButcher(butcherId) && itemName.includes(' - ')) {
-                        const nameParts = itemName.split(' - ');
-                        if (nameParts.length >= 3) {
-                            lookupName = nameParts[1].trim(); // Get English name (middle part)
-                        }
-                    }
-                    
-                    const purchasePrice = 450; // Default purchase price
-                    
-                    // Use preparing weight for all items (works for both kg and nos)
-                    const weight = parseFloat(itemWeight);
-                    
-                    // Get commission rate for this item's category (using custom rates from Google Sheets)
-                    const commissionCategory = orderItem?.category || 'default';
-                    const commission = getCommissionRate(butcherId, commissionCategory, butcherCustomRates?.commissionRates);
-                    
-                    // Revenue calculation formula: (preparing weight × purchase price) - commission rate
-                    // This works for both kg and nos units
-                    const totalPrice = weight * purchasePrice; // Total price before commission
-                    const commissionAmount = totalPrice * commission; // Commission amount
-                    const itemRevenue = totalPrice - commissionAmount; // Final revenue for butcher
-                    
-                    console.log(`Fallback calculation for ${itemName}:`, {
-                        itemName,
-                        weight,
-                        unit: orderItem?.unit || 'kg',
-                        purchasePrice,
-                        totalPrice,
-                        commission,
-                        commissionAmount,
-                        itemRevenue,
-                        calculation: `${weight} ${orderItem?.unit || 'kg'} × ₹${purchasePrice} = ₹${totalPrice} - ₹${commissionAmount} = ₹${itemRevenue}`
-                    });
-                    
-                    itemRevenues[itemName] = itemRevenue;
-                    totalRevenue += itemRevenue;
-                });
-            } else {
-                console.log('Revenue already calculated in main loop, skipping fallback');
-            }
-        }
-        
-        const revenue = totalRevenue;
-        
-        console.log('\n=== REVENUE CALCULATION SUMMARY ===');
-        console.log(`Butcher: ${butcherId}`);
-        console.log(`Total Revenue: ₹${revenue.toFixed(2)}`);
-        console.log(`Item Revenues:`, itemRevenues);
-        console.log(`Preparing Weights:`, preparingWeightsData);
-        console.log(`Revenue Type: ${typeof revenue}`);
-        console.log(`Revenue Value: ${revenue}`);
-        console.log(`Is Revenue Valid: ${!isNaN(revenue) && revenue > 0}`);
-        console.log('=====================================\n');
-        
-        const preparationEndTime = new Date();
-        const completionTime = order.preparationStartTime ? 
-            Math.max(5, Math.round((preparationEndTime.getTime() - order.preparationStartTime.getTime()) / 60000)) : // Convert to minutes, minimum 5 minutes
-            5; // Default to 5 minutes if no start time
-        
-        console.log('Order completion calculation DEBUG:', {
-            orderId: order.id,
-            hasPreparationStartTime: !!order.preparationStartTime,
-            preparationStartTime: order.preparationStartTime,
-            preparationStartTimeType: typeof order.preparationStartTime,
-            preparationEndTime,
-            completionTimeMs: preparationEndTime.getTime() - (order.preparationStartTime?.getTime() || 0),
-            completionTimeMinutes: completionTime,
-            orderStatus: order.status,
-            preparingWeightsData,
-            totalPreparingWeight,
-            itemRevenues,
-            totalRevenue: revenue
-        });
-        
-        const updatedOrder: Order = { 
-            ...order, 
-            status: 'completed', // Changed from 'prepared' to 'completed'
-            preparationEndTime, 
-            // Store weights in the correct field based on butcher type
-            ...(isMeatButcher(butcherId) 
-                ? { itemQuantities: preparingWeightsData } 
-                : { itemWeights: preparingWeightsData }
-            ),
-            // Update pickedWeight to reflect the actual weights being used for completion
-            pickedWeight: totalPreparingWeight, // Use the actual preparing weights
-            revenue,
-            itemRevenues, // Store individual item revenues
-            completionTime // Add completion time in minutes
-        };
-        
-        try {
-          console.log('Updating order with data:', {
-            orderId: updatedOrder.id,
-            status: updatedOrder.status,
-            revenue: updatedOrder.revenue,
-            itemRevenues: updatedOrder.itemRevenues,
-            revenueType: typeof updatedOrder.revenue,
-            itemRevenuesType: typeof updatedOrder.itemRevenues,
-            hasRevenue: !!updatedOrder.revenue,
-            hasItemRevenues: !!updatedOrder.itemRevenues,
-            pickedWeight: updatedOrder.pickedWeight,
-            itemWeights: updatedOrder.itemWeights,
-            itemQuantities: updatedOrder.itemQuantities,
-            butcherType: isMeatButcher(butcherId) ? 'meat' : 'fish',
-            preparingWeightsData: preparingWeightsData
-          });
-          
-          await onUpdate(updatedOrder);
-          
-          // Save sales data to Sales VCS sheet via API (only for completed orders)
-          if (updatedOrder.status === 'completed') {
             try {
-              console.log('\n=== DASHBOARD: Sending sales data for completed order ===');
-              console.log('Order ID:', updatedOrder.id);
-              console.log('Butcher ID:', butcherId);
-              console.log('Order Status:', updatedOrder.status);
-              console.log('Order Data:', updatedOrder);
-              console.log('Order Items:', updatedOrder.items);
-              console.log('Item Quantities:', updatedOrder.itemQuantities);
-              console.log('Item Weights:', updatedOrder.itemWeights);
-              
-              const requestBody = {
-                orderId: updatedOrder.id,
-                butcherId: butcherId,
-                orderData: updatedOrder
-              };
-              console.log('Request body being sent:', JSON.stringify(requestBody, null, 2));
-              
-              const salesResponse = await fetch('/api/sales-data', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody),
-              });
-              
-              console.log('Sales API Response Status:', salesResponse.status);
-              
-              let responseData;
-              try {
-                responseData = await salesResponse.json();
-                console.log('Sales API Response Data:', responseData);
-              } catch (jsonError) {
-                console.error('❌ Failed to parse response as JSON:', jsonError);
-                const responseText = await salesResponse.text();
-                console.error('❌ Raw response text:', responseText);
-                responseData = { error: 'Invalid JSON response', rawResponse: responseText };
-              }
-              
-              if (salesResponse.ok) {
-                console.log('✅ Sales data saved to Sales VCS sheet for completed order:', updatedOrder.id);
-                toast({ 
-                  title: "Order Completed Successfully", 
-                  description: `Order ${getDisplayOrderId(updatedOrder.id)} completed and synced to all sheets.`,
-                  variant: "default"
-                });
-              } else {
-                console.error('❌ Failed to save sales data to Sales VCS sheet. Response status:', salesResponse.status);
-                console.error('❌ Response data:', responseData);
-                console.error('❌ Response headers:', Object.fromEntries(salesResponse.headers.entries()));
-                
-                // Show error to user since this is important for analytics
-                const errorMessage = responseData?.details || responseData?.error || `HTTP ${salesResponse.status}`;
-                toast({
-                  variant: "destructive",
-                  title: "Sales Data Upload Failed",
-                  description: `Failed to upload sales data for order ${getDisplayOrderId(updatedOrder.id)}: ${errorMessage}`
-                });
-              }
-            } catch (error) {
-              console.error('❌ Error saving sales data to Sales VCS sheet:', error);
-              console.error('Error details:', {
-                message: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined,
-                name: error instanceof Error ? error.name : undefined,
-                orderId: updatedOrder.id,
-                butcherId: butcherId,
-                status: updatedOrder.status
-              });
-              
-              // Show error to user since this is important for analytics
-              const errorMessage = error instanceof Error ? error.message : String(error);
-              toast({
-                variant: "destructive",
-                title: "Sales Data Upload Error",
-                description: `Error uploading sales data for order ${getDisplayOrderId(updatedOrder.id)}: ${errorMessage}`
-              });
+                await onUpdate(revertedOrder);
+            } catch (revertError) {
+                // ✅ FIX: Don't call refetch() - SSE will update automatically
             }
-          } else {
-            console.log('⚠️ Order not completed yet, skipping sales data upload. Status:', updatedOrder.status);
-          }
-          
-          // Immediately refetch orders to update UI
-          refetch();
-          toast({ 
-              title: "Order Prepared", 
-              description: `${getDisplayOrderId(order.id)} is ready and saved to sheet.`,
-              variant: "success"
-          });
-        } catch (error) {
-          console.error('Error updating order:', error);
-          toast({ 
-            variant: "destructive", 
-            title: "API Error", 
-            description: `Failed to save order to sheet: ${error instanceof Error ? error.message : 'Unknown error'}` 
-          });
+            
+            toast({
+                title: "Completion Failed",
+                description: error.message || `Failed to complete ${getDisplayOrderId(order.id)}. Please try again.`,
+                variant: "destructive"
+            });
         } finally {
-          setIsLoading(false);
+            // Remove from pending operations
+            setPendingOperations(prev => {
+                const next = new Set(prev);
+                next.delete(order.id);
+                return next;
+            });
+            setIsLoading(false);
         }
     };
 
@@ -1107,6 +1450,60 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
         return 'N/A';
     };
 
+    // Helper function to get preparing weight for an item
+    const getItemPreparingWeight = (item: OrderItem): string | null => {
+        // First check if item has preparingWeight directly
+        if ((item as any).preparingWeight) {
+            return (item as any).preparingWeight;
+        }
+        
+        // Then check order.itemWeights or itemQuantities
+        if (isMeatButcher(butcherId)) {
+            if (order.itemQuantities && order.itemQuantities[item.name]) {
+                return `${order.itemQuantities[item.name]}${item.unit}`;
+            }
+        } else {
+            if (order.itemWeights && order.itemWeights[item.name]) {
+                return `${order.itemWeights[item.name]}kg`;
+            }
+        }
+        
+        return null;
+    };
+
+    // Helper function to get item revenue
+    const getItemRevenue = (item: OrderItem): number | null => {
+        if (!order.itemRevenues) {
+            return null;
+        }
+        
+        // ✅ FIX: Revenue is stored with key format: "itemName_size" (e.g., "black pomfret_small")
+        const itemSize = item.size || 'default';
+        const itemKey = `${item.name}_${itemSize}`;
+        
+        // Try the full key first (itemName_size)
+        if (order.itemRevenues[itemKey] !== undefined) {
+            return order.itemRevenues[itemKey];
+        }
+        
+        // Fallback: Try just item name (for backward compatibility)
+        if (order.itemRevenues[item.name] !== undefined) {
+            return order.itemRevenues[item.name];
+        }
+        
+        return null;
+    };
+
+    // Helper function to check if item is rejected
+    const isItemRejected = (item: OrderItem): boolean => {
+        return !!(item as any).rejected;
+    };
+
+    // Helper function to get item rejection reason
+    const getItemRejectionReason = (item: OrderItem): string | null => {
+        return (item as any).rejected || null;
+    };
+
     const statusStyling = getStatusStyling();
     const StatusIcon = statusStyling.icon;
 
@@ -1117,13 +1514,13 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
                 isOverdue ? "border-red-500/50 bg-red-50 dark:bg-red-950/20" : "bg-white dark:bg-gray-900",
                 statusStyling.cardClass
             )}>
-                <CardHeader className="pb-4">
+                <CardHeader className="pb-2 pt-3 px-4">
                     <div className="flex justify-between items-start">
                         <div className="space-y-1">
-                            <CardTitle className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">
+                            <CardTitle className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors">
                                 {getDisplayOrderId(order.id)}
                             </CardTitle>
-                            <CardDescription className="text-base font-medium text-muted-foreground">
+                            <CardDescription className="text-lg font-medium text-muted-foreground">
                                 {order.customerName}
                             </CardDescription>
                         </div>
@@ -1132,7 +1529,7 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
                             
                             {/* Dynamic Status Badge */}
                             <div className={cn(
-                                "flex items-center gap-2 px-3 py-1 rounded-md font-medium text-sm",
+                                "flex items-center gap-2 px-3 py-1 rounded-md font-medium text-base",
                                 statusStyling.statusClass
                             )}>
                                 <StatusIcon className="h-4 w-4" />
@@ -1145,97 +1542,122 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
                         </div>
                     </div>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="space-y-3">
-                        {order.items.map((item, index) => (
-                            <div key={item.id} className="group/item p-4 rounded-xl bg-gradient-to-r from-muted/30 to-muted/10 border border-border/50 hover:border-primary/20 transition-all duration-200 animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
+                <CardContent className="space-y-3 py-3">
+                    <div className="space-y-2">
+                        {order.items.map((item, index) => {
+                            const itemRejected = isItemRejected(item);
+                            const rejectionReason = getItemRejectionReason(item);
+                            const preparingWeight = getItemPreparingWeight(item);
+                            const itemRevenue = getItemRevenue(item);
+                            
+                            return (
+                                <div 
+                                    key={item.id} 
+                                    className={cn(
+                                        "group/item p-2.5 rounded-lg bg-gradient-to-r from-muted/30 to-muted/10 border transition-all duration-200",
+                                        itemRejected 
+                                            ? "border-red-300 dark:border-red-800/50 bg-red-50/30 dark:bg-red-950/20" 
+                                            : "border-border/50 hover:border-primary/20"
+                                    )}
+                                >
                                 <div className="flex justify-between items-start">
-                                    <div className="flex-1 space-y-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-semibold text-foreground text-base">
+                                        <div className="flex-1 space-y-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className={cn(
+                                                    "font-semibold text-base",
+                                                    itemRejected 
+                                                        ? "line-through text-gray-500 dark:text-gray-500" 
+                                                        : "text-foreground"
+                                                )}>
                                                 {getItemDisplayName(item.name, butcherId)}
                                             </span>
+                                                {/* Show preparing weight if available, otherwise show original quantity only for new orders */}
+                                                {order.status === 'new' ? (
                                             <span className="text-muted-foreground text-sm font-medium">
-                                                ({item.quantity} {item.unit})
+                                                        {item.quantity}{item.unit}
                                             </span>
+                                                ) : preparingWeight ? (
+                                                    <span className="text-primary text-sm font-medium">
+                                                        {preparingWeight}
+                                                </span>
+                                                ) : null}
+                                                {itemRejected && rejectionReason && (
+                                                    <Badge variant="destructive" className="text-sm px-2 py-0.5">
+                                                        {rejectionReason.length > 20 ? rejectionReason.substring(0, 20) + '...' : rejectionReason}
+                                                    </Badge>
+                                                )}
+                                                {!itemRejected && (order.status === 'preparing' || order.status === 'completed') && (
+                                                    <Badge variant="outline" className="text-sm px-2 py-0.5 bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800">
+                                                        Accepted
+                                                    </Badge>
+                                                )}
                                             {item.size && (
-                                                <span className="text-primary text-sm font-medium bg-primary/10 px-2 py-1 rounded-md">
+                                                    <Badge variant="outline" className="text-sm px-2 py-0.5">
                                                     Size: {item.size}
-                                                </span>
-                                            )}
-                                        </div>
-                                        {order.pickedWeight && !isArchived && (
-                                            <div className="flex items-center gap-2">
-                                                <Weight className="h-4 w-4 text-primary" />
-                                                <span className="text-sm font-semibold text-primary">
-                                                    Picked: {getDisplayWeight(order, butcherId).toFixed(2)}kg
-                                                </span>
-                                            </div>
-                                        )}
-                                        
-                                        <div className="flex gap-2 flex-wrap">
-                                            {item.size && (
-                                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 shadow-sm">
-                                                    <PackageCheck className="h-3 w-3" />
-                                                    Size: {item.size}
-                                                </span>
+                                                    </Badge>
                                             )}
                                             {item.cutType && (
-                                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 shadow-sm">
-                                                    <CookingPot className="h-3 w-3" />
-                                                    Cut: {item.cutType}
-                                                </span>
+                                                    <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                                        {item.cutType}
+                                                    </Badge>
                                             )}
                                     </div>
+                                            
+                                            {/* Show item revenue in completed/preparing tabs - compact inline display */}
+                                            {isArchived && itemRevenue !== null && !itemRejected && (
+                                                <div className="flex items-center gap-1.5 mt-1">
+                                                    <IndianRupee className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                                    <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">{itemRevenue.toFixed(2)}</span>
                                 </div>
+                                            )}
                                 </div>
                             </div>
-                        ))}
+                                </div>
+                            );
+                        })}
                     </div>
                     
 
-
-                     {isArchived && (order.status === 'prepared' || order.status === 'completed') && (
-                        <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-muted/20 to-muted/10 border border-border/30 space-y-3">
-                            <h4 className="font-semibold text-foreground text-sm uppercase tracking-wide">Order Summary</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {isArchived && (order.status === 'prepared' || order.status === 'completed' || order.status === 'rejected') && (
+                        <div className="mt-3 pt-3 border-t border-border/30">
+                            <div className="flex items-center justify-between gap-4 flex-wrap text-sm">
                                 {order.pickedWeight && (
-                                    <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30">
-                                        <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40">
-                                            <Weight className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            </div>
-                                        <div>
-                                            <p className="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">Picked Weight</p>
-                                            <p className="text-sm font-bold text-blue-800 dark:text-blue-200">{getDisplayWeight(order, butcherId).toFixed(2)}kg</p>
-                                        </div>
+                                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                                        <Weight className="h-3 w-3" />
+                                        <span>{getDisplayWeight(order, butcherId).toFixed(2)}kg</span>
                                     </div>
                                 )}
-                                <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200/50 dark:border-green-800/30">
-                                    <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/40">
-                                        <Clock className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                <div className="flex items-center gap-1.5 text-muted-foreground">
+                                    <Clock className="h-3 w-3" />
+                                    <span>{getPrepTime(order.preparationStartTime, order.preparationEndTime)}</span>
                                     </div>
-                                    <div>
-                                        <p className="text-xs font-medium text-green-600 dark:text-green-400 uppercase tracking-wide">Prep Time</p>
-                                        <p className="text-sm font-bold text-green-800 dark:text-green-200">{getPrepTime(order.preparationStartTime, order.preparationEndTime)}</p>
-                                    </div>
-                            </div>
-                            {order.revenue && (
-                                    <div className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30">
-                                        <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/40">
-                                            <IndianRupee className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                                        </div>
-                                        <div>
-                                            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">Revenue</p>
-                                            <p className="text-sm font-bold text-emerald-800 dark:text-emerald-200">₹{order.revenue.toFixed(2)}</p>
-                                        </div>
-                                </div>
-                            )}
+                                {(() => {
+                                    // ✅ FIX: Calculate revenue from itemRevenues if order.revenue is missing/zero
+                                    // This handles cases where revenue wasn't properly calculated or stored
+                                    let displayRevenue = order.revenue;
+                                    
+                                    if ((displayRevenue === undefined || displayRevenue === null || displayRevenue === 0) && order.itemRevenues) {
+                                        // Sum all item revenues (rejected items already have 0 revenue)
+                                        displayRevenue = Object.values(order.itemRevenues).reduce((sum, rev) => sum + rev, 0);
+                                    }
+                                    
+                                    // Only show revenue if it's greater than 0 (don't show ₹0.00)
+                                    if (displayRevenue !== undefined && displayRevenue !== null && displayRevenue > 0) {
+                                        return (
+                                            <div className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                                                <IndianRupee className="h-3 w-3" />
+                                                <span>{displayRevenue.toFixed(2)}</span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                             </div>
                         </div>
                     )}
                     {order.address && (
-                        <div className="text-base text-muted-foreground mt-4 pt-4 border-t flex items-start gap-2">
-                           <MapPin className="h-4 w-4 mt-0.5 shrink-0" /> 
+                        <div className="text-sm text-muted-foreground mt-2 pt-2 border-t border-border/30 flex items-start gap-1.5">
+                           <MapPin className="h-3 w-3 mt-0.5 shrink-0" /> 
                            <span>{order.address}</span>
                         </div>
                     )}
@@ -1247,26 +1669,20 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
                                 variant="outline" 
                                 size="sm" 
                                 onClick={handleReject}
-                                disabled={isLoading}
+                                disabled={isPending || isLoading}
                                 className="hover:bg-red-50 hover:border-red-300 hover:text-red-600 dark:hover:bg-red-950/20 dark:hover:border-red-800 dark:hover:text-red-400 transition-all duration-200 shadow-modern hover:shadow-modern-lg disabled:opacity-50"
                             >
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Processing...
-                                    </>
-                                ) : (
-                                    <>
+                                {/* ✅ FIX: Remove loading text - button disabled but no spinner */}
                                         <ThumbsDown className="mr-2 h-4 w-4" /> 
                                         Reject
-                                    </>
-                                )}
                             </Button>
                             <Button 
                                 size="sm" 
                                 onClick={handleAccept}
-                                className="bg-gradient-primary hover:shadow-modern-lg transition-all duration-200 text-primary-foreground font-semibold"
+                                disabled={isPending || isLoading}
+                                className="bg-gradient-primary hover:shadow-modern-lg transition-all duration-200 text-primary-foreground font-semibold disabled:opacity-50"
                             >
+                                {/* ✅ FIX: Remove loading text - button disabled but no spinner */}
                                 <ThumbsUp className="mr-2 h-4 w-4" /> 
                                 Accept Order
                             </Button>
@@ -1278,93 +1694,144 @@ const OrderCard = ({ order, onUpdate, butcherId, isArchived, butcherMenu, refetc
                             onClick={() => {
                             if (isMeatButcher(butcherId)) {
                                 // Meat butchers: Use itemQuantities for revenue calculation
-                                // For items that went through weight dialog, always use the custom weights
-                                // For other items, use original quantities
                                 const weightsToUse: {[key: string]: string} = {};
                                 
                                 order.items.forEach(item => {
                                     if (order.itemQuantities && order.itemQuantities[item.name]) {
-                                        // Use custom entered weight if available
                                         weightsToUse[item.name] = order.itemQuantities[item.name];
-                                        console.log(`Using custom weight for ${item.name}: ${order.itemQuantities[item.name]}`);
                                     } else {
-                                        // Use original quantity for items that didn't go through weight dialog
                                         weightsToUse[item.name] = item.quantity.toString();
-                                        console.log(`Using original quantity for ${item.name}: ${item.quantity}`);
                                     }
                                 });
-                                
-                                console.log('\n=== MEAT BUTCHER MARK AS PREPARED ===');
-                                console.log('Order itemQuantities:', order.itemQuantities);
-                                console.log('Final weights to use:', weightsToUse);
-                                console.log('=====================================\n');
                                 
                                 handlePrepared(weightsToUse);
                             } else {
                                 // Fish butchers: Use itemWeights for revenue calculation
-                                // For items that went through weight dialog, always use the custom weights
-                                // For other items, use original quantities
                                 const weightsToUse: {[key: string]: string} = {};
                                 
                                 order.items.forEach(item => {
                                     if (order.itemWeights && order.itemWeights[item.name]) {
-                                        // Use custom entered weight if available
                                         weightsToUse[item.name] = order.itemWeights[item.name];
-                                        console.log(`Using custom weight for ${item.name}: ${order.itemWeights[item.name]}`);
                                     } else {
-                                        // Use original quantity for items that didn't go through weight dialog
                                         weightsToUse[item.name] = item.quantity.toString();
-                                        console.log(`Using original quantity for ${item.name}: ${item.quantity}`);
                                     }
                                 });
-                                
-                                console.log('\n=== FISH BUTCHER MARK AS PREPARED ===');
-                                console.log('Order itemWeights:', order.itemWeights);
-                                console.log('Final weights to use:', weightsToUse);
-                                console.log('=====================================\n');
                                 
                                 handlePrepared(weightsToUse);
                             }
                             }} 
-                            disabled={isLoading}
+                            disabled={isLoading || isPending}
                             className="bg-gradient-success hover:shadow-modern-lg transition-all duration-200 text-white font-semibold disabled:opacity-50"
                         >
-                           {isLoading ? (
-                               <>
-                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                   Saving...
-                               </>
-                           ) : (
-                               <>
+                           {/* ✅ FIX: Remove loading text - button disabled but no spinner */}
                                    <CheckCircle className="mr-2 h-4 w-4" />
                                    Mark as Prepared
-                               </>
-                           )}
                         </Button>
                     )}
                 </CardFooter>
             </Card>
 
-
-
+            {/* Dialogs - Only render for new orders */}
+            {order.status === 'new' && (
+                <>
+                    <ItemAcceptDialog
+                        order={order}
+                        dialogState={itemAcceptDialogState}
+                        updateDialogState={(updates: any) => {
+                            // Update both itemAcceptDialog and potentially itemRejectDialog
+                            const newState: any = { 
+                                itemAcceptDialog: { ...itemAcceptDialogState, ...updates }
+                            };
+                            if (updates.itemRejectDialog) {
+                                newState.itemRejectDialog = updates.itemRejectDialog;
+                            }
+                            updateDialogState(newState);
+                        }}
+                        handleItemAccept={handleItemAccept}
+                        handleItemCancel={() => updateDialogState({ itemAcceptDialog: { isOpen: false, currentIndex: 0 } })}
+                        butcherId={butcherId}
+                    />
+                    
+            <WeightDialog
+                order={order}
+                dialogState={dialogState}
+                updateDialogState={updateDialogState}
+                handleWeightSubmit={handlePickedWeightSubmit}
+                handleWeightCancel={() => updateDialogState({ isOpen: false })}
+                        butcherId={butcherId}
+            />
             
+            <RejectDialog
+                order={order}
+                rejectDialogState={rejectDialogState}
+                updateRejectDialogState={updateRejectDialogState}
+                handleReject={handleReject}
+                handleRejectConfirm={handleRejectConfirm}
+            />
+                    
+                    {/* Item Rejection Dialog */}
+                    <Dialog open={itemRejectDialogState.isOpen} onOpenChange={(open) => updateItemRejectDialogState({ isOpen: open })}>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Reject Item</DialogTitle>
+                                <DialogDescription>
+                                    Please provide a reason for rejecting this item.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                                <div>
+                                    <Label htmlFor="item-reject-reason">Reason for rejection</Label>
+                                    <Textarea
+                                        id="item-reject-reason"
+                                        placeholder="Enter reason for rejecting this item..."
+                                        value={itemRejectDialogState.reason}
+                                        onChange={(e) => updateItemRejectDialogState({ reason: e.target.value })}
+                                        className="mt-2"
+                                    />
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => updateItemRejectDialogState({ isOpen: false, reason: '', itemId: '' })}>
+                                    Cancel
+                                </Button>
+                                <Button 
+                                    variant="destructive" 
+                                    onClick={handleItemReject}
+                                    disabled={!itemRejectDialogState.reason.trim()}
+                                >
+                                    Reject Item
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                </>
+            )}
         </>
     );
 };
 
+// Main Dashboard Component
 export default function OrderManagementPage() {
   const { butcher } = useAuth();
   const { toast } = useToast();
-  const { updateOrder } = useOrderUpdate();
-  // Removed useOrderAlert - using global alert system from layout instead
 
-  // Global dialog state to prevent reset during polling
+  // Global dialog state to prevent reset during cache updates
   const [globalDialogState, setGlobalDialogState] = useState<{
     [orderId: string]: {
       isOpen: boolean;
       weights: {[itemName: string]: string};
-      unit: 'kg' | 'g';
+      rejectedItems: {[itemName: string]: string}; // itemId -> rejection reason
+      unit: 'kg' | 'nos'; // Only kg and nos, no grams
       currentIndex: number;
+      itemAcceptDialog?: {
+        isOpen: boolean;
+        currentIndex: number;
+      };
+      itemRejectDialog?: {
+        isOpen: boolean;
+        reason: string;
+        itemId: string;
+      };
       rejectDialog?: {
         isOpen: boolean;
         reason: string;
@@ -1372,13 +1839,22 @@ export default function OrderManagementPage() {
     }
   }>({});
 
+  // Track orders in optimistic transition (showing skeleton)
+  const [optimisticTransitions, setOptimisticTransitions] = useState<{
+    [orderId: string]: {
+      originalStatus: string;
+      targetStatus: string;
+      order: Order;
+    }
+  }>({});
+
   // Current dialog order data
   const [currentDialogOrder, setCurrentDialogOrder] = useState<Order | null>(null);
 
-  // Use polling hook with 5-second interval for real-time updates
-  const { orders: allOrders, isLoading, error, refetch } = useOrderPolling({
+  // Use cache hook - orders pushed from Central API via SSE
+  // SSE provides real-time updates, so no refreshInterval needed
+  const { orders: allOrders, isLoading, error, refetch } = useOrderCache({
     butcherId: butcher?.id || '',
-    pollingInterval: 5000, // 5 seconds for real-time updates as requested
     enabled: !!butcher
   });
 
@@ -1397,398 +1873,242 @@ export default function OrderManagementPage() {
   const today = new Date();
   const todayString = today.toDateString();
   
+  // ✅ FIX: Get order IDs that are in optimistic transitions (to exclude from original tabs)
+  // This must be calculated BEFORE filtering todayOrders to ensure instant tab transitions
+  const optimisticOrderIds = new Set(Object.keys(optimisticTransitions));
+  
   const todayOrders = allOrders.filter(order => {
     const orderDate = new Date(order.orderTime);
     const isToday = orderDate.toDateString() === todayString;
-    console.log(`Order ${order.id}: date=${orderDate.toDateString()}, today=${todayString}, isToday=${isToday}, status=${order.status}`);
     return isToday;
   });
   
-  console.log('=== ORDER FILTERING DEBUG ===');
-  console.log('Total orders:', allOrders.length);
-  console.log('Today orders:', todayOrders.length);
-  console.log('Today string:', todayString);
+  // ✅ FIX: Include optimistic transitions in order lists AND exclude from original tabs
+  // This ensures orders move instantly between tabs without waiting for SSE
+  const newOrders = todayOrders.filter(o => 
+    o.status === 'new' && !optimisticOrderIds.has(o.id)  // Exclude orders in optimistic transitions
+  );
+  const preparingOrders = [
+    ...todayOrders.filter(o => 
+      o.status === 'preparing' && !optimisticOrderIds.has(o.id)  // Exclude orders in optimistic transitions
+    ),
+    ...Object.values(optimisticTransitions)
+      .filter(t => t.targetStatus === 'preparing')
+      .map(t => t.order)
+  ];
+  const completedOrders = [
+    ...todayOrders.filter(o => 
+      (o.status === 'completed' || o.status === 'rejected') && !optimisticOrderIds.has(o.id)  // Exclude orders in optimistic transitions
+    ),
+    ...Object.values(optimisticTransitions)
+      .filter(t => t.targetStatus === 'completed' || t.targetStatus === 'rejected')  // ✅ FIX: Include rejected orders
+      .map(t => t.order)
+  ];
   
-  const newOrders = todayOrders.filter(o => o.status === 'new');
-  const preparingOrders = todayOrders.filter(o => o.status === 'preparing');
-  const archivedOrders = todayOrders.filter(o => ['prepared', 'completed', 'ready to pick up', 'rejected'].includes(o.status) || o.rejectionReason);
-  
-  console.log('New orders:', newOrders.length);
-  console.log('Preparing orders:', preparingOrders.length);
-  console.log('Archived orders:', archivedOrders.length);
-  console.log('Archived orders list:', archivedOrders.map(o => ({ id: o.id, status: o.status })));
-  console.log('=== END ORDER FILTERING DEBUG ===');
 
-  
   const handleOrderUpdate = async (updatedOrder: Order) => {
     if (!butcher) return;
-  
-    try {
-      console.log('=== HANDLE ORDER UPDATE START ===');
-      console.log('Updating order:', updatedOrder.id, 'to status:', updatedOrder.status);
-      
-      // Update in Google Sheets first
-      await updateOrder(butcher!.id, updatedOrder);
-      console.log('Order updated successfully in sheets');
-    
-      // Immediate refresh to get updated data from server
-      console.log('Refetching orders...');
-      await refetch();
-      console.log('Orders refetched successfully');
-      console.log('=== HANDLE ORDER UPDATE END ===');
-
-      
-    } catch (error: any) {
-      console.error('=== HANDLE ORDER UPDATE ERROR ===');
-      console.error('Error updating order:', error);
-      toast({
-        variant: "destructive",
-        title: "Failed to update order",
-        description: error.message || "Please try again."
-      });
-    }
+    // This is called from OrderCard, but we handle optimistic transitions via useEffect below
   };
-  
-  const TabContent = ({ orders, icon: Icon, title, description, showSkeleton, isArchived, refetch, allOrders, globalDialogState, setGlobalDialogState, setCurrentDialogOrder }: { orders: Order[], icon: React.ElementType, title: string, description: string, showSkeleton?: boolean, isArchived?: boolean, refetch: () => Promise<void>; allOrders: Order[]; globalDialogState: any; setGlobalDialogState: any; setCurrentDialogOrder: any }) => (
-    <div className="space-y-4">
-        {showSkeleton ? (
-            <div className="grid gap-4">
-                {Array.from({ length: 2 }).map((_, i) => (
-                    <div key={i}>
-                        <OrderCardSkeleton />
-                    </div>
-                ))}
-            </div>
-        ) : orders.length > 0 ? (
-            <div className="grid gap-4">
-                {orders.map((order) => (
-                    <div key={order.id}>
-                        <OrderCard order={order} onUpdate={handleOrderUpdate} butcherId={butcher!.id} isArchived={isArchived} butcherMenu={butcher!.menu} refetch={refetch} allOrders={allOrders} globalDialogState={globalDialogState} setGlobalDialogState={setGlobalDialogState} setCurrentDialogOrder={setCurrentDialogOrder} />
-                    </div>
-                ))}
-            </div>
-        ) : (
-            <div className="text-center py-16 px-4">
-                <div className="mx-auto w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
-                    <Icon className="h-8 w-8 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">{title}</h3>
-                <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">{description}</p>
-            </div>
-        )}
-    </div>
-  );
 
-  if (!butcher) return null;
+  // ✅ FIX: Remove optimistic transitions when SSE confirms the update
+  useEffect(() => {
+    setOptimisticTransitions((prev: any) => {
+      const next = { ...prev };
+      let changed = false;
+      
+      // Check each optimistic transition
+      Object.keys(prev).forEach(orderId => {
+        const transition = prev[orderId];
+        // Check if order exists in allOrders with matching status
+        const realOrder = allOrders.find(o => o.id === orderId);
+        if (realOrder && realOrder.status === transition.targetStatus) {
+          // SSE confirmed - remove optimistic transition
+          delete next[orderId];
+          changed = true;
+        }
+      });
+      
+      return changed ? next : prev;
+      });
+  }, [allOrders]);
+
+  if (!butcher) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-foreground">Please select a butcher</h1>
+          <p className="text-muted-foreground mt-2">Choose a butcher to view orders</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ FIX: Remove global loading screen - show orders immediately
+  // Only show loading on initial load (when orders array is empty and isLoading is true)
+  // After initial load, SSE handles updates without blocking UI
+  if (isLoading && allOrders.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+          <h1 className="text-xl font-semibold text-foreground">Loading orders...</h1>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Modern Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-gradient-primary shadow-modern">
-              <CookingPot className="h-6 w-6 text-primary-foreground" />
+    <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 space-y-4 sm:space-y-6">
+      {/* ✅ FIX: Responsive header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Order Management</h1>
+          <p className="text-sm sm:text-base text-muted-foreground mt-1">
+            Managing orders for {butcher.name}
+          </p>
         </div>
-          <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-                Order Management
-              </h1>
-              <p className="text-muted-foreground font-medium">
-                Today's orders only - View historical orders in Analytics
-              </p>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <div className="text-xs sm:text-sm text-muted-foreground">
+            Last updated: {new Date().toLocaleTimeString()}
           </div>
-        </div>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={refetch} 
-            disabled={isLoading}
-            className="hover:shadow-modern transition-all duration-200"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="ml-2 hidden sm:inline">Refresh</span>
-          </Button>
         </div>
       </div>
 
-
-      {/* Modern Tabs */}
-      <Tabs defaultValue="new" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3 bg-muted/50 p-1 rounded-xl shadow-modern">
-          <TabsTrigger 
-            value="new" 
-            className="rounded-lg data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-modern transition-all duration-200 font-semibold"
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse-slow" />
-              New ({newOrders.length})
-            </div>
+      {/* ✅ FIX: Responsive Kanban-style Tabs with padding */}
+      <Tabs defaultValue="new" className="w-full">
+        <TabsList className="grid w-full grid-cols-3 gap-1 sm:gap-2 p-1 px-2 sm:px-1">
+          <TabsTrigger value="new" className="flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            New Orders
+      {newOrders.length > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {newOrders.length}
+              </Badge>
+            )}
           </TabsTrigger>
-          <TabsTrigger 
-            value="preparing" 
-            className="rounded-lg data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-modern transition-all duration-200 font-semibold"
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse-slow" />
-              Preparing ({preparingOrders.length})
-            </div>
+          <TabsTrigger value="preparing" className="flex items-center gap-2">
+            <Timer className="h-4 w-4" />
+            Preparing
+            {preparingOrders.length > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {preparingOrders.length}
+              </Badge>
+            )}
           </TabsTrigger>
-          <TabsTrigger 
-            value="archived" 
-            className="rounded-lg data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-modern transition-all duration-200 font-semibold"
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              Completed ({archivedOrders.length})
-            </div>
+          <TabsTrigger value="completed" className="flex items-center gap-2">
+            <CheckCircle className="h-4 w-4" />
+            Completed
+            {completedOrders.length > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {completedOrders.length}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
-      <TabsContent value="new">
-        <TabContent orders={newOrders} icon={CookingPot} title="No new orders today" description="New orders from customers will appear here. Only today's orders are shown." showSkeleton={isLoading && newOrders.length === 0} refetch={refetch} allOrders={allOrders} globalDialogState={globalDialogState} setGlobalDialogState={setGlobalDialogState} setCurrentDialogOrder={setCurrentDialogOrder} />
-      </TabsContent>
-      <TabsContent value="preparing">
-        <TabContent orders={preparingOrders} icon={PackageCheck} title="No orders in preparation today" description="Accepted orders will be displayed here. Only today's orders are shown." showSkeleton={isLoading && preparingOrders.length === 0} refetch={refetch} allOrders={allOrders} globalDialogState={globalDialogState} setGlobalDialogState={setGlobalDialogState} setCurrentDialogOrder={setCurrentDialogOrder} />
-      </TabsContent>
-      <TabsContent value="archived">
-          <TabContent orders={archivedOrders} icon={AlertCircle} title="No completed orders today" description="Completed and rejected orders are shown here. Only today's orders are shown." showSkeleton={isLoading && archivedOrders.length === 0} isArchived={true} refetch={refetch} allOrders={allOrders} globalDialogState={globalDialogState} setGlobalDialogState={setGlobalDialogState} setCurrentDialogOrder={setCurrentDialogOrder} />
-      </TabsContent>
-    </Tabs>
-    
-    {/* Global Weight Dialog - Rendered outside of polling-affected components */}
-    {/* Reject Dialog */}
-    {allOrders.map((order) => {
-      const rejectDialogState = globalDialogState[order.id]?.rejectDialog;
-      if (rejectDialogState?.isOpen) {
-        return (
-          <RejectDialog
-            key={`reject-${order.id}`}
-            order={order}
-            rejectDialogState={rejectDialogState}
-            updateRejectDialogState={(updates) => setGlobalDialogState((prev: any) => ({
-              ...prev,
-              [order.id]: {
-                ...prev[order.id],
-                rejectDialog: {
-                  ...prev[order.id]?.rejectDialog,
-                  ...updates
-                }
-              }
-            }))}
-            handleReject={async () => {
-              const rejectionReason = rejectDialogState.reason;
-              if (!rejectionReason.trim()) {
-                toast({ 
-                  variant: "destructive", 
-                  title: "Reason Required", 
-                  description: "Please provide a reason for declining this order." 
-                });
-                return;
-              }
+        {/* New Orders Tab */}
+        <TabsContent value="new" className="mt-4 sm:mt-6">
+          {newOrders.length > 0 ? (
+          <div className="grid gap-4">
+            {newOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                onUpdate={handleOrderUpdate}
+                butcherId={butcher.id}
+                refetch={refetch}
+                allOrders={allOrders}
+                globalDialogState={globalDialogState}
+                setGlobalDialogState={setGlobalDialogState}
+                setCurrentDialogOrder={setCurrentDialogOrder}
+                setOptimisticTransitions={setOptimisticTransitions}
+              />
+            ))}
+          </div>
+          ) : (
+            <div className="text-center py-12 border-2 border-dashed rounded-lg">
+              <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">No new orders</h3>
+              <p className="text-muted-foreground">New orders will appear here</p>
+        </div>
+      )}
+        </TabsContent>
 
-              try {
-                const updatedOrder = { ...order, status: 'rejected' as const, rejectionReason };
-                await handleOrderUpdate(updatedOrder);
+        {/* Preparing Orders Tab */}
+        <TabsContent value="preparing" className="mt-4 sm:mt-6">
+          {preparingOrders.length > 0 ? (
+          <div className="grid gap-4">
+            {preparingOrders.map((order) => {
+              // ✅ FIX: Show actual order immediately with optimistic data
+              // Use optimistic order if available, otherwise use real order
+              const displayOrder = optimisticTransitions[order.id]?.targetStatus === 'preparing'
+                ? optimisticTransitions[order.id].order
+                : order;
+              
+              return (
+              <OrderCard
+                key={order.id}
+                  order={displayOrder}
+                onUpdate={handleOrderUpdate}
+                butcherId={butcher.id}
+                refetch={refetch}
+                allOrders={allOrders}
+                globalDialogState={globalDialogState}
+                setGlobalDialogState={setGlobalDialogState}
+                setCurrentDialogOrder={setCurrentDialogOrder}
+                  setOptimisticTransitions={setOptimisticTransitions}
+              />
+              );
+            })}
+          </div>
+          ) : (
+            <div className="text-center py-12 border-2 border-dashed rounded-lg">
+              <Timer className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">No orders in preparation</h3>
+              <p className="text-muted-foreground">Orders being prepared will appear here</p>
+        </div>
+      )}
+        </TabsContent>
+
+        {/* Completed Orders Tab */}
+        <TabsContent value="completed" className="mt-4 sm:mt-6">
+          {completedOrders.length > 0 ? (
+          <div className="grid gap-4">
+              {completedOrders.map((order) => {
+                // ✅ FIX: Show actual order immediately with optimistic data
+                // Use optimistic order if available, otherwise use real order
+                const optimisticTransition = optimisticTransitions[order.id];
+                const displayOrder = optimisticTransition && (optimisticTransition.targetStatus === 'completed' || optimisticTransition.targetStatus === 'rejected')
+                  ? optimisticTransition.order 
+                  : order;
                 
-                // Close dialog and reset state
-                setGlobalDialogState((prev: any) => ({
-                  ...prev,
-                  [order.id]: {
-                    ...prev[order.id],
-                    rejectDialog: { isOpen: false, reason: '' }
-                  }
-                }));
-                
-                toast({ 
-                  title: "Order Declined", 
-                  description: `${getDisplayOrderId(order.id)} has been declined.`,
-                  variant: "destructive"
-                });
-              } catch (error) {
-                console.error('Error rejecting order:', error);
-                toast({ 
-                  variant: "destructive", 
-                  title: "Error", 
-                  description: "Failed to reject order. Please try again." 
-                });
-              }
-            }}
-            onClose={() => {
-              setGlobalDialogState((prev: any) => ({
-                ...prev,
-                [order.id]: {
-                  ...prev[order.id],
-                  rejectDialog: { isOpen: false, reason: '' }
-                }
-              }));
-            }}
-            isLoading={false}
-          />
-        );
-      }
-      return null;
-    })}
-
-    {currentDialogOrder && globalDialogState[currentDialogOrder.id] && (
-      <WeightDialog
-        order={currentDialogOrder}
-        butcherId={butcher!.id}
-        dialogState={globalDialogState[currentDialogOrder.id]}
-        updateDialogState={(updates) => setGlobalDialogState((prev: any) => ({
-          ...prev,
-          [currentDialogOrder.id]: {
-            ...prev[currentDialogOrder.id],
-            ...updates
-          }
-        }))}
-        handlePickedWeightSubmit={() => {
-          const dialogState = globalDialogState[currentDialogOrder.id];
-          const currentItem = currentDialogOrder.items[dialogState.currentIndex];
-          if (!currentItem) {
-            console.error('No current item found at index:', dialogState.currentIndex);
-            return;
-          }
-          
-          const currentWeight = dialogState.weights[currentItem.name] || '';
-          let weight = parseFloat(currentWeight);
-          
-          if (isNaN(weight) || weight <= 0) {
-            toast({ 
-              variant: "destructive", 
-              title: "Validation Error", 
-              description: `Please enter a valid picked weight for ${currentItem.name}.` 
-            });
-            return;
-          }
-          
-          // Validate reasonable weight limits (prevent data entry errors)
-          if (weight > 100) {
-            toast({ 
-              variant: "destructive", 
-              title: "Weight Too High", 
-              description: `Weight ${weight}kg seems too high. Please check if you meant ${(weight/1000).toFixed(3)}kg or ${weight/1000}kg?` 
-            });
-            return;
-          }
-          
-          // Convert to kg if needed
-          if (dialogState.unit === 'g') {
-            weight = weight / 1000;
-          }
-
-          // Update the weights object
-          const newWeights = { ...dialogState.weights, [currentItem.name]: weight.toString() };
-
-          // Check if we have weights for all items
-          if (dialogState.currentIndex < currentDialogOrder.items.length - 1) {
-            // Move to next item
-            setGlobalDialogState((prev: any) => ({
-              ...prev,
-              [currentDialogOrder.id]: {
-                ...prev[currentDialogOrder.id],
-                weights: newWeights,
-                currentIndex: prev[currentDialogOrder.id].currentIndex + 1
-              }
-            }));
-            toast({ 
-              title: "Weight Saved", 
-              description: `Weight for ${currentItem.name} saved. Moving to next item.`,
-              variant: "default"
-            });
-          } else {
-            // All weights collected, update the order
-            const totalPickedWeight = Object.values(newWeights).reduce((sum: number, w) => sum + parseFloat(w as string), 0);
-            
-            console.log('\n=== ORDER ACCEPTANCE DEBUG ===');
-            console.log('Weights collected:', newWeights);
-            console.log('Total picked weight:', totalPickedWeight);
-            console.log('Order items:', currentDialogOrder.items.map(item => ({ name: item.name, quantity: item.quantity })));
-            console.log('Butcher type:', isMeatButcher(butcher!.id) ? 'meat' : 'fish');
-            
-            const updatedOrder: Order = { 
-              ...currentDialogOrder, 
-              status: 'preparing' as const, 
-              preparationStartTime: new Date(), 
-              pickedWeight: totalPickedWeight as number // Update pickedWeight to reflect custom entered weights
-            };
-            
-            // Store weights differently based on butcher type
-            if (isMeatButcher(butcher!.id)) {
-              // Meat butchers: Store in itemQuantities
-              updatedOrder.itemQuantities = newWeights;
-              console.log('Meat butcher - stored in itemQuantities:', updatedOrder.itemQuantities);
-            } else {
-              // Fish butchers: Store in itemWeights
-              updatedOrder.itemWeights = newWeights;
-              console.log('Fish butcher - stored in itemWeights:', updatedOrder.itemWeights);
-            }
-            
-            console.log('Updated order:', {
-              id: updatedOrder.id,
-              status: updatedOrder.status,
-              itemQuantities: updatedOrder.itemQuantities,
-              itemWeights: updatedOrder.itemWeights,
-              pickedWeight: updatedOrder.pickedWeight
-            });
-            console.log('=====================================\n');
-            
-            // Close dialog first to prevent any race conditions
-            setCurrentDialogOrder(null);
-            setGlobalDialogState((prev: any) => ({
-              ...prev,
-              [currentDialogOrder.id]: {
-                isOpen: false,
-                weights: {},
-                unit: 'kg',
-                currentIndex: 0
-              }
-            }));
-            
-            // Update order
-            handleOrderUpdate(updatedOrder);
-            
-            // Check if there are still other new orders before stopping alert
-            const remainingNewOrders = allOrders.filter(o => o.status === 'new' && o.id !== currentDialogOrder.id);
-            console.log('Fish butcher order accepted:', currentDialogOrder.id, '- remaining new orders:', remainingNewOrders.length);
-            if (remainingNewOrders.length === 0 && (window as any).globalStopAlert) {
-              console.log('No more new orders, stopping alert immediately');
-              (window as any).globalStopAlert();
-            }
-            
-            // Show success message
-            toast({ 
-              title: "Order Accepted", 
-              description: `${getDisplayOrderId(currentDialogOrder.id)} is now being prepared with total weight ${(totalPickedWeight as number).toFixed(2)}kg.`,
-              variant: "default"
-            });
-            
-            // Refetch orders to update the UI
-            setTimeout(async () => {
-              await refetch();
-            }, 100);
-          }
-        }}
-        onClose={() => {
-          setCurrentDialogOrder(null);
-          setGlobalDialogState((prev: any) => ({
-            ...prev,
-            [currentDialogOrder.id]: {
-              isOpen: false,
-              weights: {},
-              unit: 'kg',
-              currentIndex: 0
-            }
-          }));
-        }}
-      />
-    )}
+                return (
+              <OrderCard
+                key={order.id}
+                    order={displayOrder}
+                onUpdate={handleOrderUpdate}
+                butcherId={butcher.id}
+                isArchived={true}
+                refetch={refetch}
+                allOrders={allOrders}
+                globalDialogState={globalDialogState}
+                setGlobalDialogState={setGlobalDialogState}
+                setCurrentDialogOrder={setCurrentDialogOrder}
+                    setOptimisticTransitions={setOptimisticTransitions}
+              />
+                );
+              })}
+          </div>
+          ) : (
+            <div className="text-center py-12 border-2 border-dashed rounded-lg">
+              <CheckCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No completed orders</h3>
+              <p className="text-gray-500 dark:text-gray-400">Completed orders will appear here</p>
+        </div>
+      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
-
-
-    

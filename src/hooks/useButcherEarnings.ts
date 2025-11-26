@@ -62,7 +62,7 @@ export const useButcherEarnings = ({
       if (!earnings) {
         const defaultEarnings: ButcherEarnings = {};
         orderItems.forEach(item => {
-          const defaultPrice = 450;
+          const defaultPrice = 0;
           const butcherPrice = defaultPrice - (defaultPrice * 0.07);
           defaultEarnings[item.name] = {
             purchasePrice: defaultPrice,

@@ -19,7 +19,7 @@ import Link from 'next/link';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '../../components/ui/sheet';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { cn } from '../../lib/utils';
-import { useOrderPolling } from '../../hooks/useOrderPolling';
+import { useOrderCache } from '../../hooks/useOrderCache';
 import { useOrderAlert } from '../../hooks/useOrderAlert';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 
@@ -49,10 +49,10 @@ export default function DashboardLayout({
     };
   }, []);
 
-  // Global order polling for notifications - use same interval as main page
-  const { orders } = useOrderPolling({
+  // Global order cache for notifications - orders pushed from Central API via SSE
+  const { orders } = useOrderCache({
     butcherId: butcher?.id || '',
-    pollingInterval: 5000, // 5 seconds - real-time updates for better user experience
+    // No refreshInterval - SSE provides real-time updates!
     enabled: !!butcher
   });
 
@@ -102,13 +102,18 @@ export default function DashboardLayout({
           key={item.label}
           href={item.href}
           className={cn(
-            "flex items-center gap-3 rounded-xl px-4 py-3 text-muted-foreground transition-all duration-200 hover:text-primary hover:bg-primary/5 hover:shadow-modern group",
-            pathname === item.href && "bg-gradient-primary text-primary-foreground shadow-modern-lg"
+            "flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 hover:bg-primary/10 hover:shadow-modern group",
+            // ✅ FIX: Better contrast for light theme - use foreground color instead of muted
+            pathname === item.href 
+              ? "bg-primary text-primary-foreground shadow-modern-lg" 
+              : "text-foreground/80 dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground"
           )}
         >
           <item.icon className={cn(
             "h-5 w-5 transition-all duration-200",
-            pathname === item.href ? "text-primary-foreground" : "text-muted-foreground group-hover:text-primary"
+            pathname === item.href 
+              ? "text-primary-foreground" 
+              : "text-foreground/70 dark:text-muted-foreground group-hover:text-primary"
           )} />
           <span className="font-medium">{item.label}</span>
           {pathname === item.href && (
@@ -121,18 +126,18 @@ export default function DashboardLayout({
 
   return (
     <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
-      <div className="hidden border-r bg-gradient-to-b from-muted/50 to-muted/30 backdrop-blur-sm md:block">
+      <div className="hidden border-r bg-background dark:bg-gradient-to-b dark:from-muted/50 dark:to-muted/30 backdrop-blur-sm md:block">
         <div className="flex h-full max-h-screen flex-col gap-2">
           <div className="flex h-14 items-center border-b border-border/50 px-4 lg:h-[60px] lg:px-6">
             <Link href="/dashboard" className="flex items-center gap-3 font-semibold group">
-                <div className="p-2 rounded-lg bg-gradient-primary shadow-modern group-hover:shadow-modern-lg transition-all duration-200">
+                <div className="p-2 rounded-lg bg-primary shadow-modern group-hover:shadow-modern-lg transition-all duration-200">
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 text-primary-foreground">
                     <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
                     <line x1="3" y1="6" x2="21" y2="6"/>
                     <path d="m16 10-4 4-4-4"/>
                   </svg>
                 </div>
-                <span className="text-foreground group-hover:text-primary transition-colors">ButcherBot POS</span>
+                <span className="text-foreground group-hover:text-primary transition-colors">VCS</span>
             </Link>
           </div>
           <div className="flex-1 p-2">
@@ -140,7 +145,7 @@ export default function DashboardLayout({
           </div>
         </div>
       </div>
-      <div className="flex flex-col">
+      <div className="flex flex-col w-full max-w-full overflow-x-hidden">
         <header className="flex h-14 items-center gap-4 border-b border-border/50 bg-gradient-to-r from-background/95 to-muted/30 backdrop-blur-sm px-4 lg:h-[60px] lg:px-6">
           <Sheet>
             <SheetTrigger asChild>
@@ -160,7 +165,7 @@ export default function DashboardLayout({
               <NavLinks />
             </SheetContent>
           </Sheet>
-          <div className="w-full flex-1">
+          <div className="w-full max-w-full flex-1 overflow-x-hidden">
             {/* Can add search bar here if needed */}
           </div>
           

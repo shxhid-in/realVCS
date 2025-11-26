@@ -23,20 +23,19 @@ import {
 } from "lucide-react"
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns"
 import type { Order } from "../../lib/types"
-import { getCommissionRate } from "../../lib/rates"
-import { getSellingPriceFromMenu } from "../../lib/salesSheets"
 import { getItemPurchasePricesFromSheet } from "../../lib/sheets"
 import { freshButchers } from "../../lib/freshMockData"
 
 interface OrdersAnalyticsProps {
   className?: string
+  allOrders: Order[] // Shared orders data from parent
+  onRefresh?: () => void // Parent refresh function
+  isLoading?: boolean
 }
 
-export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
+export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: externalIsLoading }: OrdersAnalyticsProps) {
   const { toast } = useToast()
-  const [allOrders, setAllOrders] = useState<Order[]>([])
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [selectedButcher, setSelectedButcher] = useState<string>('all')
   const [dateRange, setDateRange] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily')
   const [customDateRange, setCustomDateRange] = useState<{start: string, end: string}>({
@@ -46,56 +45,6 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [itemStats, setItemStats] = useState<Record<string, { totalWeight: number; totalRevenue: number; count: number }>>({})
   const [isCalculatingItemStats, setIsCalculatingItemStats] = useState(false)
-
-  // Fetch all orders from all butchers
-  const fetchAllOrders = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const butcherIds = freshButchers.map(b => b.id)
-      const orderPromises = butcherIds.map(async (butcherId) => {
-        try {
-          const response = await fetch(`/api/orders/${butcherId}`)
-          if (response.ok) {
-            const responseData = await response.json()
-            const orders = responseData.orders || responseData
-            if (Array.isArray(orders)) {
-              return orders.map((order: Order) => ({
-                ...order,
-                butcherId,
-                butcherName: freshButchers.find(b => b.id === butcherId)?.name || butcherId
-              }))
-            }
-            return []
-          }
-          return []
-        } catch (error) {
-          console.error(`Error fetching orders for ${butcherId}:`, error)
-          return []
-        }
-      })
-      
-      const allOrdersResults = await Promise.all(orderPromises)
-      const validResults = allOrdersResults.filter(Array.isArray)
-      const flatOrders = validResults.flat()
-      
-      // Log for debugging duplicate orders
-      const orderIds = flatOrders.map(o => o.id)
-      const duplicateIds = orderIds.filter((id, index) => orderIds.indexOf(id) !== index)
-      if (duplicateIds.length > 0) {
-      }
-      
-      setAllOrders(flatOrders)
-    } catch (error) {
-      console.error('Error fetching all orders:', error)
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to fetch orders data.",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }, [toast])
 
   // Filter orders based on selected butcher and date range
   const filterOrders = useCallback(() => {
@@ -159,26 +108,32 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
     setFilteredOrders(deduplicatedOrders)
   }, [allOrders, selectedButcher, dateRange, customDateRange])
 
-  // Load orders on component mount
-  useEffect(() => {
-    fetchAllOrders()
-  }, []) // Remove fetchAllOrders dependency to prevent infinite loop
+  // Don't auto-fetch on mount - data loads only on refresh button click
+  // useEffect(() => {
+  //   fetchAllOrders()
+  // }, [])
 
-  // Filter orders when filters change
+  // Filter orders when filters or shared data change
   useEffect(() => {
     filterOrders()
-  }, [allOrders, selectedButcher, dateRange, customDateRange]) // Use direct dependencies instead of filterOrders
+  }, [filterOrders])
 
-  // Manual refresh
+  // Manual refresh - calls parent refresh function
   const handleRefresh = async () => {
-    setIsRefreshing(true)
-    await fetchAllOrders()
-    setIsRefreshing(false)
-    toast({
-      title: "Refreshed",
-      description: "Orders data has been updated.",
-    })
+    if (onRefresh) {
+      setIsRefreshing(true)
+      await onRefresh()
+      setIsRefreshing(false)
+      toast({
+        title: "Refreshed",
+        description: "Orders data has been updated from sheets.",
+      })
+    }
   }
+
+  // Use external loading state if provided
+  const isLoadingState = externalIsLoading !== undefined ? externalIsLoading : false
+  const isRefreshingState = isRefreshing
 
   // Export orders to CSV
   const handleExportCSV = () => {
@@ -292,13 +247,15 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
   const stats = getSummaryStats()
 
   // Get purchase price for a single item
-  const getPurchasePriceFromMenu = async (butcherId: string, itemName: string): Promise<number> => {
+  const getPurchasePriceFromMenu = async (butcherId: string, itemName: string, size: string = 'default'): Promise<number> => {
     try {
+      // For now, we'll use getItemPurchasePricesFromSheet which doesn't support size
+      // In the future, this should be updated to use the actual getPurchasePriceFromMenu from sheets.ts
+      // that supports size parameter, or getItemPurchasePricesFromSheet should be updated to support size
       const purchasePrices = await getItemPurchasePricesFromSheet(butcherId, [itemName]);
       const price = purchasePrices[itemName] || 0;
       return price;
     } catch (error) {
-      console.error(`Error getting purchase price for ${itemName}:`, error);
       return 0;
     }
   };
@@ -324,8 +281,10 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
     
     for (const item of order.items) {
       try {
-        // Get purchase price from menu
-        const purchasePrice = await getPurchasePriceFromMenu(order.butcherId || 'usaj', item.name);
+        // Get size from order item, default to 'default' if not present
+        const itemSize = item.size || 'default';
+        // Get purchase price from menu (pass size parameter)
+        const purchasePrice = await getPurchasePriceFromMenu(order.butcherId || 'usaj', item.name, itemSize);
         
         if (purchasePrice > 0) {
           // Distribute weight proportionally based on item quantity
@@ -336,10 +295,8 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
           
           totalRevenue += itemRevenue;
         } else {
-          console.warn(`⚠️ No purchase price found for item: ${item.name} in butcher: ${order.butcherId}`);
         }
       } catch (error) {
-        console.error(`Error getting purchase price for ${item.name}:`, error);
       }
     }
     
@@ -397,7 +354,6 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
 
         setItemStats(stats);
       } catch (error) {
-        console.error('Error calculating item stats:', error);
       } finally {
         setIsCalculatingItemStats(false);
       }
@@ -411,7 +367,7 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
     .map(([name, stats]) => ({ name, ...stats }))
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-  if (isLoading) {
+  if (isLoadingState) {
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center py-8">
@@ -426,25 +382,27 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
     <div className={className ? `space-y-6 ${className}` : 'space-y-6'}>
       {/* Header */}
       <Card>
-        <CardHeader>
-          <div className="flex justify-between items-start">
+        <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
             <div>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="h-5 w-5" />
+              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                <Package className="h-5 w-5 flex-shrink-0" />
                 Orders Analytics
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm mt-1">
                 Track all orders processed by all butchers with detailed analytics
               </CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={handleExportCSV} variant="outline" size="sm" disabled={filteredOrders.length === 0}>
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <Button onClick={handleExportCSV} variant="outline" size="sm" disabled={filteredOrders.length === 0} className="text-xs sm:text-sm">
+                <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">Export CSV</span>
+                <span className="sm:hidden">Export</span>
               </Button>
-              <Button onClick={handleRefresh} disabled={isRefreshing} variant="outline" size="sm">
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              <Button onClick={handleRefresh} disabled={isRefreshingState} variant="outline" size="sm" className="text-xs sm:text-sm">
+                <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 ${isRefreshingState ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{isRefreshingState ? 'Refreshing...' : 'Refresh'}</span>
+                <span className="sm:hidden">{isRefreshingState ? 'Refreshing' : 'Refresh'}</span>
               </Button>
             </div>
           </div>
@@ -667,8 +625,9 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
             </div>
           ) : (
             <>
-              {/* Desktop Table View */}
-              <div className="hidden lg:block overflow-x-auto">
+              {/* ✅ FIX: Scrollable table for all screen sizes */}
+              <div className="w-full overflow-x-auto scrollbar-hide">
+                <div className="min-w-[800px]">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -777,6 +736,7 @@ export function OrdersAnalytics({ className }: OrdersAnalyticsProps) {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               </div>
 
               {/* Mobile Card View */}

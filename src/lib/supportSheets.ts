@@ -12,7 +12,7 @@ export interface SupportRequest {
   butcherId: string;
   butcherName: string;
   message: string | null;
-  packingRequests: { [size: string]: number } | null;
+  packingRequests: string[] | null; // Array of selected pack sizes (e.g., ["0.5kg", "1kg"])
   timestamp: string;
   type: 'general_contact' | 'packing_request';
   status: 'pending' | 'resolved';
@@ -144,8 +144,19 @@ export const getSupportRequests = async (butcherId?: string): Promise<SupportReq
         let packingRequests = null;
         if (packingRequestsStr) {
           try {
-            packingRequests = JSON.parse(packingRequestsStr);
+            const parsed = JSON.parse(packingRequestsStr);
+            // Only accept array format (tick mark format)
+            if (Array.isArray(parsed)) {
+              packingRequests = parsed;
+            } else {
+              // If old format (object), convert to empty array (ignore old format)
+              packingRequests = null;
+            }
           } catch (e) {
+            // If parsing fails, try to parse as comma-separated string (fallback)
+            if (packingRequestsStr.includes(',')) {
+              packingRequests = packingRequestsStr.split(',').map((s: string) => s.trim()).filter(Boolean);
+            }
           }
         }
 
@@ -269,8 +280,6 @@ export const deleteSupportRequest = async (requestId: string): Promise<void> => 
 
     const sheets = await getGoogleSheetsClient();
     
-    console.log('Attempting to delete support request:', requestId);
-    
     // First, get the spreadsheet to find the correct sheet name
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SUPPORT_SHEET_ID,
@@ -283,13 +292,10 @@ export const deleteSupportRequest = async (requestId: string): Promise<void> => 
     );
     
     if (!supportSheet?.properties?.title) {
-      console.error('Support sheet not found. Available sheets:', 
-        spreadsheet.data.sheets?.map(s => s.properties?.title));
       throw new Error('Support sheet not found');
     }
     
     const actualSheetName = supportSheet.properties.title;
-    console.log('Using sheet name:', actualSheetName);
     
     // Get all requests to find the row
     const response = await sheets.spreadsheets.values.get({
@@ -298,7 +304,6 @@ export const deleteSupportRequest = async (requestId: string): Promise<void> => 
     });
 
     const rows = response.data.values || [];
-    console.log('Found rows in support sheet:', rows.length);
     
     let rowIndex = -1;
 
@@ -306,24 +311,18 @@ export const deleteSupportRequest = async (requestId: string): Promise<void> => 
       const row = rows[i];
       if (row && row[0] === requestId) {
         rowIndex = i + 2; // +2 because we start from row 2 and arrays are 0-indexed
-        console.log('Found request at row index:', rowIndex);
         break;
       }
     }
 
     if (rowIndex === -1) {
-      console.error('Support request not found:', requestId);
-      console.log('Available request IDs:', rows.map(row => row?.[0]).filter(Boolean));
       throw new Error('Support request not found');
     }
 
     // Use the support sheet we already found
     if (!supportSheet?.properties?.sheetId) {
-      console.error('Support sheet ID not found');
       throw new Error('Support sheet ID not found');
     }
-
-    console.log('Deleting row from sheet:', actualSheetName, 'at row:', rowIndex);
 
     // Delete the row
     await sheets.spreadsheets.batchUpdate({
@@ -342,9 +341,9 @@ export const deleteSupportRequest = async (requestId: string): Promise<void> => 
       }
     });
     
-    console.log('Successfully deleted support request:', requestId);
+    console.log(`[Contact] Support request deleted: ${requestId}`);
   } catch (error: any) {
-    console.error('Error deleting support request from Google Sheets, using fallback:', error);
+    console.error('[Contact] Error deleting support request:', error);
     // Use fallback storage
     fallbackSupportRequests = fallbackSupportRequests.filter(req => req.id !== requestId);
   }
