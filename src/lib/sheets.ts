@@ -780,54 +780,6 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                 }
             }
         });
-        
-        console.log(`\n=== FINAL PRICE LOOKUP RESULT for ${butcherId} ===`);
-        console.log(`Sheet rows found: ${rows.length}`);
-        console.log(`Items requested: ${itemNames.join(', ')}`);
-        console.log(`Items matched: ${Object.keys(prices).join(', ')}`);
-        console.log(`Final prices:`, prices);
-        console.log(`Sheet was empty: ${rows.length === 0}`);
-        
-        // Debug: Show all available menu items for comparison
-        console.log(`\n=== AVAILABLE MENU ITEMS IN SHEET ===`);
-        rows.forEach((row, index) => {
-            if (isMeatButcher) {
-                const [itemName, , purchasePrice] = row;
-                console.log(`Row ${index + 1}: "${itemName}" -> ₹${purchasePrice}`);
-            } else {
-                const [itemName, , size, purchasePrice] = row;
-                console.log(`Row ${index + 1}: "${itemName}" (${size}) -> ₹${purchasePrice}`);
-            }
-        });
-        console.log(`==========================================\n`);
-        
-        console.log(`\n=== FINAL PRICES OBJECT ===`);
-        console.log('Prices found:', prices);
-        console.log('Number of prices:', Object.keys(prices).length);
-        console.log('Price keys:', Object.keys(prices));
-        console.log(`=============================\n`);
-        
-        // Special check for ayakoora meat
-        const ayakooraItems = rows.filter(row => {
-            const itemName = isMeatButcher ? row[0] : row[0];
-            return itemName && itemName.toLowerCase().includes('ayakoora');
-        });
-        if (ayakooraItems.length > 0) {
-            console.log(`\n🔍 AYAKOORA ITEMS FOUND IN SHEET:`);
-            ayakooraItems.forEach((row, index) => {
-                if (isMeatButcher) {
-                    const [itemName, , purchasePrice] = row;
-                    console.log(`Ayakoora ${index + 1}: "${itemName}" -> ₹${purchasePrice}`);
-                } else {
-                    const [itemName, , size, purchasePrice] = row;
-                    console.log(`Ayakoora ${index + 1}: "${itemName}" (${size}) -> ₹${purchasePrice}`);
-                }
-            });
-            console.log(`==========================================\n`);
-        } else {
-            console.log(`\n❌ NO AYAKOORA ITEMS FOUND IN SHEET`);
-            console.log(`==========================================\n`);
-        }
 
         return prices;
     } catch (error: any) {
@@ -1668,8 +1620,6 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             }
         });
         preparingWeight = preparingWeightParts.join(', ');
-        console.log('Final preparingWeight to save:', preparingWeight);
-        console.log('=====================================\n');
             
         // Completion Time: Time taken if within 20min, or actual IST time if exceeded
         const completionTime = getCompletionTime(order.preparationStartTime, order.preparationEndTime);
@@ -1701,65 +1651,20 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                 .filter(([itemName, revenue]) => revenue > 0) // Only include items with revenue
                 .map(([itemName, revenue]) => `{${itemName}: ${revenue.toFixed(2)}}`);
             revenueForSheet = revenueParts.join(', ');
-            console.log('Using pre-calculated item revenues:', order.itemRevenues);
         } else if (order.revenue && order.revenue > 0) {
             // Fallback: If only total revenue available, distribute equally (or use total)
             // For now, just use total as single value
             revenueForSheet = order.revenue.toFixed(2);
-            console.log('Using total revenue:', order.revenue);
         } else {
             // No revenue calculated yet
             revenueForSheet = '';
-            console.log('No revenue calculated yet for order status:', order.status);
         }
-
-        console.log('\n=== BUTCHER POS SHEET UPDATE DEBUG ===');
-        console.log('Order details:', {
-            orderId: order.id,
-            orderNo,
-            orderDate,
-            rowIndex,
-            preparingWeight,
-            completionTime,
-            startTime,
-            sheetStatus,
-            revenueForSheet,
-            orderRevenue: order.revenue,
-            orderItemRevenues: order.itemRevenues,
-            butcherId,
-            tabName,
-            range: `${tabName}!G${rowIndex}:K${rowIndex}`,
-            values: [[preparingWeight, completionTime, startTime, sheetStatus, revenueForSheet]],
-            hasRevenue: !!order.revenue,
-            hasItemRevenues: !!order.itemRevenues,
-            revenueType: typeof order.revenue,
-            itemRevenuesType: typeof order.itemRevenues,
-            orderStatus: order.status,
-            isCompleted: order.status === 'completed',
-            isPreparing: order.status === 'preparing'
-        });
-        console.log('Revenue calculation details:', {
-            orderRevenue: order.revenue,
-            itemRevenues: order.itemRevenues,
-            revenueForSheet,
-            revenueCalculation: order.itemRevenues ? 
-                Object.entries(order.itemRevenues).map(([item, rev]) => `${item}: ₹${rev.toFixed(2)}`).join(', ') :
-                `Total: ₹${order.revenue?.toFixed(2) || '0.00'}`
-        });
-        console.log('==========================================\n');
 
         // Update the specific row - both meat and fish butchers have same column structure
         // columns G, H, I, J, K (preparing weight, completion time, start time, status, revenue)
         // Note: Size column is now at position 5 (F), so preparing weight moved to position 6 (G)
         const updateRange = `${tabName}!G${rowIndex}:K${rowIndex}`;
         const updateValues = [[preparingWeight, completionTime, startTime, sheetStatus, revenueForSheet]];
-        
-        console.log('Sending update to Google Sheets:', {
-            spreadsheetId: BUTCHER_POS_SHEET_ID,
-            range: updateRange,
-            values: updateValues,
-            butcherType: isMeat ? 'meat' : 'fish'
-        });
         
         const updateResponse = await measureApiCall(
             `updateOrder:${butcherId}`,
@@ -1775,20 +1680,9 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             { sheetId: BUTCHER_POS_SHEET_ID, sheetName: 'Butcher POS Sheet' }
         );
         
-        console.log('Google Sheets update response:', {
-            status: updateResponse.status,
-            statusText: updateResponse.statusText,
-            data: updateResponse.data,
-            updatedRange: updateResponse.data?.updatedRange,
-            updatedCells: updateResponse.data?.updatedCells
-        });
-        
         if (updateResponse.status !== 200) {
             throw new Error(`Google Sheets update failed with status ${updateResponse.status}`);
         }
-        
-        console.log('✅ Order updated successfully in Google Sheets');
-        console.log('=== UPDATE ORDER IN SHEET END ===\n');
 
     } catch (error: any) {
         console.error('Error updating order in sheet:', error);
@@ -1871,29 +1765,7 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
                     const customRates = await getRatesFromSheet();
                     const butcherCustomRates = customRates.find(r => r.butcherId === butcherId);
                     
-                    // Debug logging for rates loading
-                    console.log(`=== MARKUP CALCULATION DEBUG for ${butcherId} ===`);
-                    console.log('Original category name:', category.name);
-                    console.log('Category name (lowercase):', categoryName);
-                    console.log('Custom rates loaded:', customRates.length);
-                    console.log('Butcher custom rates found:', !!butcherCustomRates);
-                    if (butcherCustomRates) {
-                        console.log('Butcher markup rates:', butcherCustomRates.markupRates);
-                    }
-                    
                     const markupRate = getMarkupRate(butcherId, categoryName, butcherCustomRates?.markupRates);
-                    
-                    // Debug logging for markup calculation
-                    console.log(`Final markup calculation for ${butcherId}:`, {
-                        itemName: itemName,
-                        categoryName: categoryName,
-                        purchasePrice: size.price,
-                        markupRate: markupRate,
-                        markupPercentage: (markupRate * 100).toFixed(1) + '%',
-                        sellingPrice: Math.round(size.price * (1 + markupRate))
-                    });
-                    console.log('=== END MARKUP CALCULATION DEBUG ===');
-                    
                     const sellingPrice = Math.round(size.price * (1 + markupRate));
                     
                     // Prepare row data
@@ -2699,7 +2571,6 @@ export const saveRatesToSheet = async (butcherRates: ButcherRates[]): Promise<vo
  */
 export const getRatesFromSheet = async (): Promise<ButcherRates[]> => {
     try {
-        console.log('=== LOADING RATES FROM GOOGLE SHEETS ===');
         if (!BUTCHER_POS_SHEET_ID) {
             throw new Error("BUTCHER_POS_SHEET_ID or GOOGLE_SPREADSHEET_ID not configured");
         }
@@ -2710,19 +2581,15 @@ export const getRatesFromSheet = async (): Promise<ButcherRates[]> => {
         // Try to read from the Rates tab
         try {
             const range = `${ratesTabName}!A:F`;
-            console.log('Attempting to read from range:', range);
             const response = await sheets.spreadsheets.values.get({
                 spreadsheetId: BUTCHER_POS_SHEET_ID,
                 range,
             });
 
             const rows = response.data.values || [];
-            console.log('Raw rows from sheet:', rows.length);
-            console.log('First few rows:', rows.slice(0, 3));
             
             if (rows.length <= 1) {
                 // No data or only header, return defaults
-                console.log('No rates data found in sheet, returning defaults');
                 return getDefaultButcherRates();
             }
 
@@ -2761,14 +2628,6 @@ export const getRatesFromSheet = async (): Promise<ButcherRates[]> => {
                     }
                 }
 
-                console.log(`Parsing rates for ${butcherId}, category ${category}:`, {
-                    commissionRateStr,
-                    markupRateStr,
-                    commissionRate,
-                    markupRate,
-                    finalMarkupRate
-                });
-
                 // Add commission rate
                 butcherRatesMap[butcherId].commissionRates.push({
                     butcherId,
@@ -2785,12 +2644,6 @@ export const getRatesFromSheet = async (): Promise<ButcherRates[]> => {
             }
 
             const result = Object.values(butcherRatesMap);
-            console.log(`Loaded rates for ${result.length} butchers from Google Sheets`);
-            console.log('Loaded rates summary:', result.map(r => ({
-                butcherId: r.butcherId,
-                markupRates: r.markupRates
-            })));
-            console.log('=== END LOADING RATES FROM GOOGLE SHEETS ===');
             return result;
 
         } catch (error) {

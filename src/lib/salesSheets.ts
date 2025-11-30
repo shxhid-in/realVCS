@@ -189,19 +189,6 @@ export const saveSalesDataToSheet = async (
   butcherId: string,
   orderData: any
 ): Promise<void> => {
-  console.log(`\n=== SAVING SALES DATA FOR ORDER ${orderId} ===`);
-  console.log('Order data received:', {
-    orderId,
-    butcherId,
-    orderStatus: orderData.status,
-    hasItems: !!orderData.items,
-    itemsCount: orderData.items?.length || 0,
-    hasItemWeights: !!orderData.itemWeights,
-    hasItemQuantities: !!orderData.itemQuantities,
-    hasRevenue: !!orderData.revenue,
-    hasItemRevenues: !!orderData.itemRevenues
-  });
-  
   // Validate inputs
   if (!orderId || !butcherId || !orderData) {
     throw new Error('Missing required parameters: orderId, butcherId, or orderData');
@@ -209,10 +196,6 @@ export const saveSalesDataToSheet = async (
 
   // Check environment variables
   const spreadsheetId = process.env.SALES_VCS_SPREADSHEET_ID;
-  console.log('Environment check:', {
-    hasSalesSpreadsheetId: !!spreadsheetId,
-    salesSpreadsheetId: spreadsheetId ? 'Set' : 'Missing'
-  });
   
   if (!spreadsheetId) {
     throw new Error('SALES_VCS_SPREADSHEET_ID environment variable is not set');
@@ -447,9 +430,7 @@ export const getSalesDataFromSheet = async (
               // Format: "ORD-YYYY-MM-DD-{orderNo}"
               const orderId = orderNo ? `ORD-${orderDateObj.getFullYear()}-${String(orderDateObj.getMonth() + 1).padStart(2, '0')}-${String(orderDateObj.getDate()).padStart(2, '0')}-${orderNo}` : '';
               // Get butcher revenue from main sheet
-              console.log(`\n=== GETTING BUTCHER REVENUE for Order ${orderId} in Butcher ${butcherId} ===`);
               const butcherRevenue = await getButcherRevenueFromMainSheet(orderId, butcherId);
-              console.log(`Butcher revenue result: ${butcherRevenue}`);
               const margin = salesRevenue - butcherRevenue;
               console.log(`Margin calculation: ${salesRevenue} - ${butcherRevenue} = ${margin}`);
               

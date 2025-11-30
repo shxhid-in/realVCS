@@ -78,16 +78,6 @@ export async function PUT(
     const { butcherId } = await params;
     const orderData: Order = await request.json();
     
-    console.log('\n=== API PUT ORDER UPDATE DEBUG ===');
-    console.log('Butcher ID:', butcherId);
-    console.log('Order ID:', orderData.id);
-    console.log('Order Status:', orderData.status);
-    console.log('Order Revenue:', orderData.revenue);
-    console.log('Order Item Revenues:', orderData.itemRevenues);
-    console.log('Order Item Weights:', orderData.itemWeights);
-    console.log('Order Item Quantities:', orderData.itemQuantities);
-    console.log('=====================================\n');
-    
     if (!butcherId || !orderData || !orderData.id) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
     }

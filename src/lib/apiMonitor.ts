@@ -69,9 +69,6 @@ export class ApiMonitor {
     // Keep only last 24 hours of data
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     apiCalls = apiCalls.filter(call => call.timestamp > twentyFourHoursAgo);
-    
-    const sheetInfo = call.sheetName ? ` [${call.sheetName}]` : '';
-    console.log(`API Call tracked: ${call.method} ${call.endpoint}${sheetInfo} - ${call.status} (${call.duration}ms)`);
   }
 
   // Get current API metrics
