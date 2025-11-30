@@ -23,7 +23,6 @@ export function cacheOrder(butcherId: string, order: Order): void {
   
   if (orderNo) {
     butcherCache.set(orderNo, order);
-    console.log(`[Cache] Cached order ${order.id} for butcher ${butcherId}`);
   }
 }
 
@@ -67,7 +66,6 @@ export function updateOrderInCache(butcherId: string, orderNo: number, updates: 
       ...updates
     };
     butcherCache.set(orderNo, updatedOrder);
-    console.log(`[Cache] Updated order ${orderNo} for butcher ${butcherId}`);
   }
 }
 
@@ -78,7 +76,6 @@ export function removeOrderFromCache(butcherId: string, orderNo: number): void {
   const butcherCache = orderCache.get(butcherId);
   if (butcherCache) {
     butcherCache.delete(orderNo);
-    console.log(`[Cache] Removed order ${orderNo} for butcher ${butcherId}`);
   }
 }
 
@@ -87,7 +84,6 @@ export function removeOrderFromCache(butcherId: string, orderNo: number): void {
  */
 export function clearButcherCache(butcherId: string): void {
   orderCache.delete(butcherId);
-  console.log(`[Cache] Cleared all orders for butcher ${butcherId}`);
 }
 
 /**

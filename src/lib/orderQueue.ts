@@ -51,7 +51,6 @@ export function queueOrder(order: Order): void {
   };
   
   orderQueue.push(queuedOrder);
-  console.log(`[Queue] Queued order ${order.id} (${orderQueue.length} orders in queue)`);
 }
 
 /**
@@ -76,7 +75,6 @@ export function queueResponse(
   };
   
   responseQueue.push(queuedResponse);
-  console.log(`[Queue] Queued response for order ${orderNo} (${responseQueue.length} responses in queue)`);
 }
 
 /**
@@ -100,7 +98,6 @@ export function removeQueuedOrder(orderId: string): void {
   const index = orderQueue.findIndex(q => q.order.id === orderId);
   if (index !== -1) {
     orderQueue.splice(index, 1);
-    console.log(`[Queue] Removed queued order ${orderId}`);
   }
 }
 
@@ -111,7 +108,6 @@ export function removeQueuedResponse(orderNo: number): void {
   const index = responseQueue.findIndex(q => q.orderNo === orderNo);
   if (index !== -1) {
     responseQueue.splice(index, 1);
-    console.log(`[Queue] Removed queued response for order ${orderNo}`);
   }
 }
 
@@ -154,7 +150,6 @@ export function queueMenuUpdate(
   };
   
   menuUpdateQueue.push(queuedUpdate);
-  console.log(`[Queue] Queued menu update for ${butcherName} (${butcherId}) - ${menuUpdateQueue.length} menu updates in queue`);
 }
 
 /**
@@ -173,7 +168,6 @@ export function removeQueuedMenuUpdate(butcherId: string, butcherName: string): 
   );
   if (index !== -1) {
     menuUpdateQueue.splice(index, 1);
-    console.log(`[Queue] Removed queued menu update for ${butcherName} (${butcherId})`);
   }
 }
 
@@ -238,7 +232,6 @@ export function clearQueues(): void {
   orderQueue.length = 0;
   responseQueue.length = 0;
   menuUpdateQueue.length = 0;
-  console.log('[Queue] Cleared all queues');
 }
 
 // Export types for use in other modules

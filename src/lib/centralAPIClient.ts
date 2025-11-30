@@ -53,8 +53,6 @@ class CentralAPIClient {
     }
 
     try {
-      console.log(`[CentralAPI] Requesting token for butcher: ${butcherName}`);
-      
       const response = await this.axiosInstance.post('/api/auth/token', {
         role: 'vcs',
         systemId: butcherName // Must match exactly: "Usaj Meat Hub", "PKD Stall", etc.
@@ -72,7 +70,6 @@ class CentralAPIClient {
         expiry: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
       });
 
-      console.log(`[CentralAPI] Token cached for butcher: ${butcherName}`);
       return token;
     } catch (error: any) {
       console.error(`[CentralAPI] Error getting token for ${butcherName}:`, error.message);
@@ -102,7 +99,6 @@ class CentralAPIClient {
       };
 
       console.log(`[CentralAPI] Sending response for order ${orderNo} from ${butcher}`);
-      console.log(`[CentralAPI] Payload:`, JSON.stringify(payload, null, 2));
 
       const response = await this.axiosInstance.post(
         `/api/orders/${orderNo}/response`,
@@ -114,7 +110,7 @@ class CentralAPIClient {
         }
       );
 
-      console.log(`[CentralAPI] Response sent successfully for order ${orderNo}`);
+      console.log(`[CentralAPI] Response sent: Order ${orderNo}`);
       return response.data;
     } catch (error: any) {
       console.error(`[CentralAPI] Error sending response for order ${orderNo}:`, error.message);
@@ -160,7 +156,6 @@ class CentralAPIClient {
       };
 
       console.log(`[CentralAPI] Notifying menu update for ${butcherName} (${butcherId})`);
-      console.log(`[CentralAPI] Payload:`, JSON.stringify(payload, null, 2));
 
       const response = await this.axiosInstance.post(
         '/api/menu/update',
@@ -172,7 +167,7 @@ class CentralAPIClient {
         }
       );
 
-      console.log(`[CentralAPI] Menu update notification sent successfully for ${butcherName}`);
+      console.log(`[CentralAPI] Menu update notification sent: ${butcherName}`);
       return response.data;
     } catch (error: any) {
       console.error(`[CentralAPI] Error notifying menu update for ${butcherName}:`, error.message);

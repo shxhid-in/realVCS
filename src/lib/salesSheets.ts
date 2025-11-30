@@ -342,7 +342,7 @@ export const saveSalesDataToSheet = async (
       }
     });
 
-    console.log(`[Order] Saved to Sales VCS sheet: Order ${orderId}, Revenue: ₹${totalSalesRevenue.toFixed(2)}`);
+    console.log(`[Order] Saved to Sales VCS sheet: Order ${orderId}`);
     
   } catch (error) {
     console.error(`[Order] Failed to save sales data for order ${orderId}:`, error);
@@ -370,7 +370,6 @@ export const getSalesDataFromSheet = async (
     for (const butcherId of butcherIds) {
       try {
         const butcherName = getButcherName(butcherId);
-        console.log(`Fetching sales data from ${butcherName} tab for butcher ${butcherId}`);
         
         const response = await sheets.spreadsheets.values.get({
           spreadsheetId,
@@ -1043,30 +1042,23 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
     console.log(`Extracted simple order ID: "${simpleOrderId}" from full order ID: "${orderId}"`);
     
     // Find the order by simple ID and extract revenue
-    console.log(`Searching for order ${simpleOrderId} in ${rows.length} rows...`);
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      console.log(`Row ${i}: orderId="${row[1]}", looking for "${simpleOrderId}"`);
       if (row.length > 1 && row[1] === simpleOrderId) {
         const revenueStr = row[revenueColumnIndex] || '';
-        console.log(`✅ Found order ${simpleOrderId} (from ${orderId}), revenue string: "${revenueStr}"`);
         
         // Handle comma-separated revenues for multiple items
         if (revenueStr.includes(',')) {
           const revenues = revenueStr.split(',').map((r: string) => parseFloat(r.trim()) || 0);
           const totalRevenue = revenues.reduce((sum: number, rev: number) => sum + rev, 0);
-          console.log(`Multiple item revenues: ${revenues}, total: ${totalRevenue}`);
           return totalRevenue;
         } else {
           const revenue = parseFloat(revenueStr) || 0;
-          console.log(`Single item revenue: ${revenue}`);
           return revenue;
         }
       }
     }
     
-    console.log(`❌ Order ${simpleOrderId} (from ${orderId}) not found in main sheet ${butcherName} tab`);
-    console.log(`Available order IDs in first 5 rows:`, rows.slice(1, 6).map(row => row[1]));
     return 0;
   } catch (error) {
     console.error('Error getting butcher revenue from main sheet:', error);

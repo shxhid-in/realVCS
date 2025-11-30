@@ -1152,7 +1152,6 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     if (revenueValues.length > 0) {
                         // Sum up all revenue values if there are multiple items
                         revenue = revenueValues.reduce((sum, rev) => sum + rev, 0);
-                        console.log(`Order ${orderNo}: Reading revenue from sheet: "${revenueFromSheet}" -> parsed: [${revenueValues.join(', ')}] -> total: ${revenue}`);
                         
                         // Store itemRevenues if parsed
                         if (Object.keys(parsedItemRevenues).length > 0) {
@@ -1163,7 +1162,6 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     // Fallback: Calculate revenue using preparing weight with default rate
                     const totalPreparingWeight = preparingWeights.reduce((sum, w) => sum + (parseFloat(w) || 0), 0);
                     revenue = totalPreparingWeight * 0; // Default rate fallback
-                    console.log(`Order ${orderNo}: No revenue in sheet, using fallback calculation: ${totalPreparingWeight} * 0 = ${revenue}`);
                 }
             } else if (status === 'rejected') {
                 // For rejected orders, read revenue from sheet if available
@@ -1173,7 +1171,6 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     if (revenueValues.length > 0) {
                         // Sum up all revenue values if there are multiple items
                         revenue = revenueValues.reduce((sum, rev) => sum + (parseFloat(rev) || 0), 0);
-                        console.log(`Order ${orderNo}: Reading rejected order revenue from sheet: "${revenueFromSheet}" -> parsed: [${revenueValues.join(', ')}] -> total: ${revenue}`);
                     }
                 } else {
                     // For rejected orders without revenue in sheet, calculate potential revenue based on quantities
@@ -1488,7 +1485,7 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
             { sheetId: BUTCHER_POS_SHEET_ID, sheetName: 'Butcher POS Sheet' }
         );
 
-        console.log(`[Order] Saved to Butcher POS sheet: Order ${orderNo}, Revenue: ₹${totalRevenue.toFixed(2)}`);
+        console.log(`[Order] Saved to Butcher POS sheet: Order ${orderNo}`);
 
         return { totalRevenue, itemRevenues };
 
@@ -1956,10 +1953,10 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             // Attempt to notify Central API
             try {
                 await centralAPIClient.notifyMenuUpdate(butcherId, butcherName);
-                console.log(`[Menu] Updated and notified Central API: ${butcherName}`);
+                console.log(`[Menu] Updated: ${butcherName}`);
             } catch (error: any) {
                 // If notification fails, queue it for retry
-                console.warn(`⚠️ Failed to notify Central API about menu update, queuing for retry:`, error.message);
+                console.warn(`[Menu] Failed to notify Central API, queuing for retry:`, error.message);
                 queueMenuUpdate(butcherId, butcherName);
             }
         } catch (error: any) {
@@ -2274,10 +2271,6 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
             const itemSize = item.size || 'default';
             let purchasePrice = 0;
 
-            console.log(`Looking up price for item: "${exactItemName}" (exact match) in ${butcherId}`);
-            console.log(`Available menu price keys:`, Object.keys(menuPrices));
-            console.log(`Direct lookup for "${exactItemName}":`, menuPrices[exactItemName]);
-
             // Fish butchers: Try size-specific matching first (case-sensitive and space-sensitive)
             if (!isMeatButcher && itemSize && itemSize !== 'default') {
                 // Try exact match with size: "Mackerel Small"
@@ -2582,17 +2575,11 @@ export const completeOrder = async (order: Order, butcherId: string): Promise<vo
  */
 export const saveRatesToSheet = async (butcherRates: ButcherRates[]): Promise<void> => {
     try {
-        console.log('Starting to save rates to sheet...');
-        console.log('Sheet ID:', BUTCHER_POS_SHEET_ID);
-        console.log('Number of butchers:', butcherRates.length);
-        
         if (!BUTCHER_POS_SHEET_ID) {
             throw new Error("BUTCHER_POS_SHEET_ID or GOOGLE_SPREADSHEET_ID not configured");
         }
 
-        console.log('Getting Google Sheets client...');
         const sheets = await getSheetSheetsClient('pos');
-        console.log('Google Sheets client obtained successfully');
         
         // Create or update the "Rates" tab
         const ratesTabName = 'Rates';
@@ -2632,9 +2619,6 @@ export const saveRatesToSheet = async (butcherRates: ButcherRates[]): Promise<vo
                 ]);
             }
         }
-
-        console.log('Prepared data rows:', dataRows.length);
-        console.log('Sample data row:', dataRows[0]);
 
         // Check if Rates tab exists, create it if it doesn't
         console.log('Checking if Rates tab exists...');

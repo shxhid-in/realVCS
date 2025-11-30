@@ -92,9 +92,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
     }
 
-    console.log('🚀 About to call updateOrderInSheet...');
     await updateOrderInSheet(orderData, butcherId);
-    console.log('✅ updateOrderInSheet completed successfully');
     
     return NextResponse.json({ success: true, message: 'Order updated successfully' });
     

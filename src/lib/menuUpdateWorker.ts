@@ -26,8 +26,6 @@ async function processMenuUpdateQueue(): Promise<void> {
     return; // Nothing to process
   }
 
-  console.log(`[MenuUpdateWorker] Processing ${queuedUpdates.length} queued menu updates`);
-
   for (const queued of queuedUpdates) {
     // Check if ready for retry
     if (!isMenuUpdateReadyForRetry(queued)) {
@@ -35,17 +33,14 @@ async function processMenuUpdateQueue(): Promise<void> {
     }
 
     try {
-      console.log(`[MenuUpdateWorker] Retrying menu update notification for ${queued.butcherName} (attempt ${queued.retryCount + 1})`);
-      
       // Attempt to notify Central API
       await centralAPIClient.notifyMenuUpdate(queued.butcherId, queued.butcherName);
       
       // Success! Remove from queue
       removeQueuedMenuUpdate(queued.butcherId, queued.butcherName);
-      console.log(`[MenuUpdateWorker] ✅ Successfully sent menu update notification for ${queued.butcherName}`);
       
     } catch (error: any) {
-      console.error(`[MenuUpdateWorker] ❌ Failed to send menu update for ${queued.butcherName}:`, error.message);
+      console.error(`[MenuUpdateWorker] Failed to send menu update for ${queued.butcherName}:`, error.message);
       
       // Increment retry count
       const canRetry = incrementMenuUpdateRetry(queued.butcherId, queued.butcherName);
@@ -53,10 +48,7 @@ async function processMenuUpdateQueue(): Promise<void> {
       if (!canRetry) {
         // Max retries reached, remove from queue
         removeQueuedMenuUpdate(queued.butcherId, queued.butcherName);
-        console.error(`[MenuUpdateWorker] ⚠️ Max retries reached for ${queued.butcherName}. Removed from queue.`);
-      } else {
-        const nextRetryDelay = getMenuUpdateRetryDelay(queued.retryCount);
-        console.log(`[MenuUpdateWorker] Will retry ${queued.butcherName} in ${nextRetryDelay / 1000}s (attempt ${queued.retryCount + 1}/${MAX_RETRY_COUNT})`);
+        console.error(`[MenuUpdateWorker] Max retries reached for ${queued.butcherName}`);
       }
     }
   }
@@ -67,11 +59,8 @@ async function processMenuUpdateQueue(): Promise<void> {
  */
 export function startMenuUpdateWorker(): void {
   if (workerInterval) {
-    console.log('[MenuUpdateWorker] Worker already running');
     return;
   }
-
-  console.log('[MenuUpdateWorker] Starting background worker...');
   
   // Process immediately on start
   processMenuUpdateQueue();
@@ -80,8 +69,6 @@ export function startMenuUpdateWorker(): void {
   workerInterval = setInterval(() => {
     processMenuUpdateQueue();
   }, WORKER_INTERVAL);
-  
-  console.log(`[MenuUpdateWorker] Background worker started (interval: ${WORKER_INTERVAL}ms)`);
 }
 
 /**
@@ -91,7 +78,6 @@ export function stopMenuUpdateWorker(): void {
   if (workerInterval) {
     clearInterval(workerInterval);
     workerInterval = null;
-    console.log('[MenuUpdateWorker] Background worker stopped');
   }
 }
 

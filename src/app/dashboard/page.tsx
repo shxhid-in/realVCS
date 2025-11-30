@@ -1082,9 +1082,8 @@ const OrderCard = ({
             });
             
             toast({
-                title: "Order Accepted",
-                description: `Order accepted successfully. ${result.warning}`,
-                variant: result.warning ? "default" : "default"
+                title: "Order accepted successfully",
+                variant: "default"
             });
             
             // ✅ FIX: Don't call refetch() - SSE will update automatically
@@ -1121,8 +1120,7 @@ const OrderCard = ({
             
             toast({
                 variant: "destructive",
-                title: "Error",
-                description: error.message || "Failed to submit order response. Please try again."
+                title: "Order can't be accepted"
             });
         } finally {
             // Remove from pending operations
@@ -1245,8 +1243,7 @@ const OrderCard = ({
             // We just need to remove from optimistic transitions
             
             toast({
-                title: "Order Rejected",
-                description: `${getDisplayOrderId(order.id)} has been rejected successfully.`
+                title: "Order rejected successfully"
             });
             
             // ✅ FIX: Remove from optimistic transitions (skeleton will be replaced by real order)
@@ -1286,8 +1283,7 @@ const OrderCard = ({
             
             toast({
                 variant: "destructive",
-                title: "Error",
-                description: error.message || "Failed to reject order. Please try again."
+                title: "Order can't be rejected"
             });
         } finally {
             // Remove from pending operations
@@ -1398,8 +1394,7 @@ const OrderCard = ({
             // The optimistic update already shows the change instantly
 
             toast({
-                title: "Order Completed!",
-                description: `Order ${getDisplayOrderId(order.id)} has been marked as completed!`,
+                title: "Order completed successfully",
                 variant: "default"
             });
 
@@ -1425,8 +1420,7 @@ const OrderCard = ({
             }
             
             toast({
-                title: "Completion Failed",
-                description: error.message || `Failed to complete ${getDisplayOrderId(order.id)}. Please try again.`,
+                title: "Order can't be completed",
                 variant: "destructive"
             });
         } finally {
