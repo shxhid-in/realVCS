@@ -126,7 +126,7 @@ export const useOrderAlert = () => {
                                 icon: '/icons/action-close.png'
                             }
                         ]
-                    });
+                    } as NotificationOptions & { vibrate: number[] });
                 }).catch(error => {
                     console.error('Failed to show notification via Service Worker:', error);
                 });
@@ -155,7 +155,7 @@ export const useOrderAlert = () => {
                                         icon: '/icons/action-close.png'
                                     }
                                 ]
-                            });
+                            } as NotificationOptions & { vibrate: number[] });
                         }).catch(error => {
                             console.error('Failed to show notification via Service Worker:', error);
                         });

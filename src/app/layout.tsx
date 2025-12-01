@@ -165,8 +165,58 @@ export default function RootLayout({
               // Handle unhandled promise rejections
               window.addEventListener('unhandledrejection', function(event) {
                 console.error('Unhandled promise rejection:', event.reason);
+                
+                // ✅ FIX: Handle chunk loading errors specifically
+                const reason = event.reason;
+                if (reason && (reason.message || reason.toString())) {
+                  const errorMessage = reason.message || reason.toString();
+                  if (errorMessage.includes('chunk') || errorMessage.includes('Loading chunk')) {
+                    console.error('[Chunk Loading Error]', errorMessage);
+                    // Prevent default error handling
+                    event.preventDefault();
+                    // Try to reload the page to fetch fresh chunks
+                    if (!sessionStorage.getItem('chunk-reload-attempted')) {
+                      sessionStorage.setItem('chunk-reload-attempted', 'true');
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 1000);
+                    } else {
+                      // If reload already attempted, clear cache and try again
+                      sessionStorage.removeItem('chunk-reload-attempted');
+                      if ('caches' in window) {
+                        caches.keys().then(function(names) {
+                          names.forEach(function(name) {
+                            caches.delete(name);
+                          });
+                        });
+                      }
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 2000);
+                    }
+                    return;
+                  }
+                }
+                
                 event.preventDefault(); // Prevent the default browser error handling
               });
+              
+              // ✅ FIX: Handle chunk loading errors from script tags
+              window.addEventListener('error', function(event) {
+                if (event.target && event.target.tagName === 'SCRIPT') {
+                  const script = event.target as HTMLScriptElement;
+                  if (script.src && (script.src.includes('_next/static/chunks') || script.src.includes('chunk'))) {
+                    console.error('[Chunk Loading Error] Failed to load:', script.src);
+                    // Try to reload the page
+                    if (!sessionStorage.getItem('chunk-reload-attempted')) {
+                      sessionStorage.setItem('chunk-reload-attempted', 'true');
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 1000);
+                    }
+                  }
+                }
+              }, true);
               
               // Service Worker status monitoring
               window.addEventListener('sw-registered', function(event) {

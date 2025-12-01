@@ -4,6 +4,7 @@ import { getButcherIdFromName } from '@/lib/butcherMapping';
 import { cacheOrder } from '@/lib/orderCache';
 import { queueOrder as queueOrderToQueue } from '@/lib/orderQueue';
 import { sendOrderUpdate } from '@/lib/sseConnectionManager';
+import { getFishItemFullName, isFishButcher } from '@/lib/freshMockData';
 import type { Order, OrderItem } from '@/lib/types';
 
 /**
@@ -68,15 +69,32 @@ export async function POST(request: NextRequest) {
     const orderId = `ORD-${orderNo}`; // Convert 123 -> "ORD-123"
     const orderDate = timestamp ? new Date(timestamp) : new Date();
 
-    // Convert items
-    const orderItems: OrderItem[] = items.map((item: any) => ({
-      id: item.itemId, // "57788-1"
-      name: item.name,
-      quantity: item.quantityParsed.value,
-      unit: item.quantityParsed.unit as 'kg' | 'g' | 'nos',
-      size: item.size || undefined,
-      cutType: item.cutType || undefined
-    }));
+    // Convert items - convert to three-language format for fish butchers
+    const orderItems: OrderItem[] = items.map((item: any) => {
+      let displayName = item.name;
+      
+      // For fish butchers, convert single English name to three-language format
+      if (isFishButcher(butcherId)) {
+        // Check if the item name already has three languages (contains ' - ')
+        if (item.name.includes(' - ') && item.name.split(' - ').length >= 3) {
+          // Already has three-language format, use as is
+          displayName = item.name;
+        } else {
+          // Only has English name, convert to three-language name
+          displayName = getFishItemFullName(item.name);
+        }
+      }
+      // For meat butchers, keep the single name as is
+      
+      return {
+        id: item.itemId, // "57788-1"
+        name: displayName,
+        quantity: item.quantityParsed.value,
+        unit: item.quantityParsed.unit as 'kg' | 'g' | 'nos',
+        size: item.size || undefined,
+        cutType: item.cutType || undefined
+      };
+    });
 
     // Create Order object
     const order: Order = {

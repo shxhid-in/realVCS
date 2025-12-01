@@ -8,6 +8,37 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // ✅ FIX: Add configuration to handle chunk loading errors
+  webpack: (config, { isServer }) => {
+    // Add error handling for chunk loading failures
+    if (!isServer) {
+      config.optimization = {
+        ...config.optimization,
+        splitChunks: {
+          chunks: 'all',
+          cacheGroups: {
+            default: false,
+            vendors: false,
+            // Create separate chunks for admin page to reduce size
+            admin: {
+              name: 'admin',
+              test: /[\\/]app[\\/]admin[\\/]/,
+              priority: 20,
+              reuseExistingChunk: true,
+            },
+            // Vendor chunks
+            vendor: {
+              name: 'vendor',
+              test: /[\\/]node_modules[\\/]/,
+              priority: 10,
+              reuseExistingChunk: true,
+            },
+          },
+        },
+      };
+    }
+    return config;
+  },
   images: {
     remotePatterns: [
       {

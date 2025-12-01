@@ -97,12 +97,18 @@ export default function AdminPage() {
   const [pollingEnabled, setPollingEnabled] = useState(true);
   const tabsListRef = useRef<HTMLDivElement>(null);
 
-  // Redirect if not admin
+  // Redirect if not admin (with proper loading check)
   useEffect(() => {
-    if (!isAdmin) {
+    // Don't redirect if auth is still loading
+    if (admin === undefined && !isAdmin) {
+      return;
+    }
+    
+    // Only redirect if we're sure the user is not an admin
+    if (!isAdmin && admin === null) {
       window.location.href = '/';
     }
-  }, [isAdmin]);
+  }, [isAdmin, admin]);
 
   // Ensure tabs start from the beginning (scroll to left on mount and after render)
   useEffect(() => {

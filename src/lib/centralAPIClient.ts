@@ -35,7 +35,7 @@ class CentralAPIClient {
     this.tokenCache = new Map();
     this.axiosInstance = axios.create({
       baseURL: this.baseUrl,
-      timeout: 10000,
+      timeout: 20000,
       headers: {
         'Content-Type': 'application/json'
       }

@@ -68,10 +68,16 @@ function getDisplayOrderId(orderId: string): string {
 
 // Helper function to get item display name
 function getItemDisplayName(itemName: string, butcherId: string): string {
-    if (isFishButcherLocal(butcherId) && itemName.includes(' - ')) {
-        const parts = itemName.split(' - ');
-        return parts[1] || itemName; // Return English name (middle part)
+    // For fish butchers, show full three-language name (manglish - english - malayalam)
+    if (isFishButcherLocal(butcherId)) {
+        // If already has three-language format, return as is
+        if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
+            return itemName;
+        }
+        // If only has single name, try to convert to three-language format
+        return getFishItemFullName(itemName);
     }
+    // For meat butchers, just return the single name
     return itemName;
 }
 

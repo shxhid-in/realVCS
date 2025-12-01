@@ -23,6 +23,16 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Log chunk loading errors specifically
+    if (error.message && error.message.includes('chunk')) {
+      console.error('[Chunk Loading Error]', error.message);
+      // Try to reload the page after a short delay to fetch fresh chunks
+      setTimeout(() => {
+        if (window.location.hash !== '#no-reload') {
+          window.location.reload();
+        }
+      }, 2000);
+    }
   }
 
   render() {

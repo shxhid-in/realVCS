@@ -2707,7 +2707,16 @@ export const getPurchasePriceFromMenu = async (
     });
     
     const rows = response.data.values || [];
-    const normalizedItemName = normalizeItemName(itemName);
+    
+    // Extract English name (middle part) from three-language format if present
+    // Format: "Manglish - English - Malayalam" -> extract "English"
+    let itemNameToMatch = itemName;
+    if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
+      const nameParts = itemName.split(' - ');
+      itemNameToMatch = nameParts[1].trim(); // English name is in the middle
+    }
+    
+    const normalizedItemName = normalizeItemName(itemNameToMatch);
     const normalizedSize = size.toLowerCase();
     
     // ✅ FIX: For meat butchers, ALWAYS match by item name only (ignore size completely)
