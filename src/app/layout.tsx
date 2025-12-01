@@ -121,9 +121,10 @@ export default function RootLayout({
                     });
                     
                     // Handle registration success
-                    window.dispatchEvent(new CustomEvent('sw-registered', { 
-                      detail: { registration } 
-                    }));
+                    var swRegisteredEvent = new CustomEvent('sw-registered', { 
+                      detail: { registration: registration } 
+                    });
+                    window.dispatchEvent(swRegisteredEvent);
                   })
                   .catch(function(error) {
                     
@@ -135,9 +136,10 @@ export default function RootLayout({
                     }
                     
                     // Handle registration failure gracefully
-                    window.dispatchEvent(new CustomEvent('sw-failed', { 
+                    var swFailedEvent = new CustomEvent('sw-failed', { 
                       detail: { error: error.message } 
-                    }));
+                    });
+                    window.dispatchEvent(swFailedEvent);
                   });
                 });
               }
@@ -149,14 +151,14 @@ export default function RootLayout({
                 console.log('Service Worker registration error:', error);
               }
               
-              // Mobile-specific error handling
+              // Mobile-specific error handling (ES5 compatible)
               window.addEventListener('error', function(event) {
                 console.error('Global error caught:', event.error);
                 
                 // Check if it's a mobile-specific error
                 if (event.error && event.error.message) {
-                  if (event.error.message.includes('NetworkError') || 
-                      event.error.message.includes('Failed to fetch')) {
+                  var errorMsg = event.error.message;
+                  if (errorMsg && (errorMsg.indexOf('NetworkError') !== -1 || errorMsg.indexOf('Failed to fetch') !== -1)) {
                     console.warn('Mobile network error detected');
                   }
                 }
@@ -166,31 +168,33 @@ export default function RootLayout({
               window.addEventListener('unhandledrejection', function(event) {
                 console.error('Unhandled promise rejection:', event.reason);
                 
-                // ✅ FIX: Handle chunk loading errors specifically
-                const reason = event.reason;
-                if (reason && (reason.message || reason.toString())) {
-                  const errorMessage = reason.message || reason.toString();
-                  if (errorMessage.includes('chunk') || errorMessage.includes('Loading chunk')) {
+                // ✅ FIX: Handle chunk loading errors specifically (ES5 compatible)
+                var reason = event.reason;
+                if (reason && (reason.message || reason.toString)) {
+                  var errorMessage = reason.message || reason.toString();
+                  if (errorMessage && (errorMessage.indexOf('chunk') !== -1 || errorMessage.indexOf('Loading chunk') !== -1)) {
                     console.error('[Chunk Loading Error]', errorMessage);
                     // Prevent default error handling
-                    event.preventDefault();
+                    if (event.preventDefault) {
+                      event.preventDefault();
+                    }
                     // Try to reload the page to fetch fresh chunks
                     if (!sessionStorage.getItem('chunk-reload-attempted')) {
                       sessionStorage.setItem('chunk-reload-attempted', 'true');
-                      setTimeout(() => {
+                      setTimeout(function() {
                         window.location.reload();
                       }, 1000);
                     } else {
                       // If reload already attempted, clear cache and try again
                       sessionStorage.removeItem('chunk-reload-attempted');
-                      if ('caches' in window) {
-                        caches.keys().then(function(names) {
+                      if ('caches' in window && window.caches && window.caches.keys) {
+                        window.caches.keys().then(function(names) {
                           names.forEach(function(name) {
-                            caches.delete(name);
+                            window.caches.delete(name);
                           });
                         });
                       }
-                      setTimeout(() => {
+                      setTimeout(function() {
                         window.location.reload();
                       }, 2000);
                     }
@@ -198,19 +202,23 @@ export default function RootLayout({
                   }
                 }
                 
-                event.preventDefault(); // Prevent the default browser error handling
+                // Prevent the default browser error handling
+                if (event.preventDefault) {
+                  event.preventDefault();
+                }
               });
               
               // ✅ FIX: Handle chunk loading errors from script tags
               window.addEventListener('error', function(event) {
                 if (event.target && event.target.tagName === 'SCRIPT') {
-                  const script = event.target as HTMLScriptElement;
-                  if (script.src && (script.src.includes('_next/static/chunks') || script.src.includes('chunk'))) {
+                  // Use plain JavaScript type checking (no TypeScript)
+                  var script = event.target;
+                  if (script && script.src && (script.src.indexOf('_next/static/chunks') !== -1 || script.src.indexOf('chunk') !== -1)) {
                     console.error('[Chunk Loading Error] Failed to load:', script.src);
                     // Try to reload the page
                     if (!sessionStorage.getItem('chunk-reload-attempted')) {
                       sessionStorage.setItem('chunk-reload-attempted', 'true');
-                      setTimeout(() => {
+                      setTimeout(function() {
                         window.location.reload();
                       }, 1000);
                     }

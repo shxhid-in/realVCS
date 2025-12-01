@@ -5,6 +5,7 @@ import React from 'react';
 interface ErrorBoundaryState {
   hasError: boolean;
   error?: Error;
+  isCritical: boolean;
 }
 
 interface ErrorBoundaryProps {
@@ -12,31 +13,99 @@ interface ErrorBoundaryProps {
   fallback?: React.ReactNode;
 }
 
+/**
+ * Determines if an error is critical and requires showing the error screen
+ * Critical errors: chunk loading, network failures, authentication failures
+ * Non-critical errors: date parsing, data format issues, etc.
+ */
+function isCriticalError(error: Error): boolean {
+  const errorMessage = error.message?.toLowerCase() || '';
+  const errorStack = error.stack?.toLowerCase() || '';
+  
+  // Critical errors that need user intervention
+  const criticalPatterns = [
+    'chunk',
+    'loading chunk',
+    'failed to fetch',
+    'networkerror',
+    'network error',
+    'failed to load',
+    'script error',
+    'syntax error',
+    'unexpected token',
+    'cannot read property',
+    'is not a function', // Only if it's a critical function, not date methods
+  ];
+  
+  // Non-critical errors that can be handled gracefully
+  const nonCriticalPatterns = [
+    'gettime',
+    'preparationendtime',
+    'preparationstarttime',
+    'date',
+    'invalid date',
+    'nan',
+  ];
+  
+  // Check if it's a non-critical error first
+  if (nonCriticalPatterns.some(pattern => errorMessage.includes(pattern) || errorStack.includes(pattern))) {
+    // But if it's combined with critical patterns, it's still critical
+    if (!criticalPatterns.some(pattern => errorMessage.includes(pattern) || errorStack.includes(pattern))) {
+      return false;
+    }
+  }
+  
+  // Check for critical patterns
+  return criticalPatterns.some(pattern => errorMessage.includes(pattern) || errorStack.includes(pattern));
+}
+
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, isCritical: false };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
+    const isCritical = isCriticalError(error);
+    return { hasError: true, error, isCritical };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log chunk loading errors specifically
-    if (error.message && error.message.includes('chunk')) {
-      console.error('[Chunk Loading Error]', error.message);
-      // Try to reload the page after a short delay to fetch fresh chunks
+    const isCritical = isCriticalError(error);
+    
+    // Log all errors
+    console.error('[ErrorBoundary]', {
+      error: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+      isCritical
+    });
+    
+    // Handle critical errors
+    if (isCritical) {
+      // Log chunk loading errors specifically
+      if (error.message && error.message.includes('chunk')) {
+        console.error('[Chunk Loading Error]', error.message);
+        // Try to reload the page after a short delay to fetch fresh chunks
+        setTimeout(() => {
+          if (window.location.hash !== '#no-reload') {
+            window.location.reload();
+          }
+        }, 2000);
+      }
+    } else {
+      // For non-critical errors, log but don't show error screen
+      console.warn('[Non-Critical Error] Handled gracefully:', error.message);
+      // Reset error state after a short delay to allow component to recover
       setTimeout(() => {
-        if (window.location.hash !== '#no-reload') {
-          window.location.reload();
-        }
-      }, 2000);
+        this.setState({ hasError: false, isCritical: false });
+      }, 100);
     }
   }
 
   render() {
-    if (this.state.hasError) {
+    // Only show error screen for critical errors
+    if (this.state.hasError && this.state.isCritical) {
       return this.props.fallback || (
         <div className="min-h-screen flex items-center justify-center bg-background p-4">
           <div className="text-center p-8 max-w-md w-full">

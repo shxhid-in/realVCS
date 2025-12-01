@@ -14,6 +14,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { format } from "date-fns"
 import { useState, useEffect, useCallback } from "react"
+import { toDate, getTimeValue } from "../../../lib/utils"
 
 // Helper function to extract order number from full order ID for display
 const getDisplayOrderId = (orderId: string): string => {
@@ -300,12 +301,19 @@ export default function AnalyticsPage() {
   }, 0);
   
   // Calculate preparation time only for orders that have both start and end times
-  const ordersWithPrepTime = completedOrders.filter(order => 
-    order.preparationEndTime && order.preparationStartTime
-  );
+  const ordersWithPrepTime = completedOrders.filter(order => {
+    const startTime = toDate(order.preparationStartTime);
+    const endTime = toDate(order.preparationEndTime);
+    return startTime && endTime;
+  });
   
   const totalPrepTime = ordersWithPrepTime.reduce((acc, order) => {
-    return acc + (order.preparationEndTime!.getTime() - order.preparationStartTime!.getTime());
+    const startTime = toDate(order.preparationStartTime);
+    const endTime = toDate(order.preparationEndTime);
+    if (startTime && endTime) {
+      return acc + (endTime.getTime() - startTime.getTime());
+    }
+    return acc;
   }, 0);
   
   // Calculate average only for orders that actually have preparation times
@@ -444,8 +452,10 @@ export default function AnalyticsPage() {
   };
 
   const getPrepTime = (order: Order) => {
-    if (order.preparationEndTime && order.preparationStartTime) {
-      const diff = order.preparationEndTime.getTime() - order.preparationStartTime.getTime();
+    const startTime = toDate(order.preparationStartTime);
+    const endTime = toDate(order.preparationEndTime);
+    if (startTime && endTime) {
+      const diff = endTime.getTime() - startTime.getTime();
       return `${Math.floor(diff / (1000 * 60))}m ${Math.floor((diff / 1000) % 60)}s`;
     }
     return 'N/A';

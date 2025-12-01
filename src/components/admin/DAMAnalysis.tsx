@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Order } from '@/lib/types';
+import { toDate } from '@/lib/utils';
 
 interface WeeklyTarget {
   week: number;
@@ -224,10 +225,12 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
         // Completion time
         let completionTime = '';
         if (order.preparationStartTime && order.preparationEndTime) {
-          const start = new Date(order.preparationStartTime);
-          const end = new Date(order.preparationEndTime);
-          const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
-          completionTime = diffMinutes <= 20 ? `${diffMinutes}min` : orderDateStr;
+          const start = toDate(order.preparationStartTime);
+          const end = toDate(order.preparationEndTime);
+          if (start && end) {
+            const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+            completionTime = diffMinutes <= 20 ? `${diffMinutes}min` : orderDateStr;
+          }
         }
         
         // Start time

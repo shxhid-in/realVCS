@@ -41,6 +41,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Line, LineChart, Area, AreaChart, ResponsiveContainer } from "recharts"
 import { format } from "date-fns"
 import { useState, useEffect, useCallback, useRef } from "react"
+import { toDate } from "../../lib/utils"
 import { useOrderCache } from "../../hooks/useOrderCache"
 import { useClientCache } from "../../hooks/useClientCache"
 import { freshButchers } from "../../lib/freshMockData"
@@ -534,9 +535,9 @@ export default function AdminPage() {
   const totalOrders = filteredOrders.length;
   const completionRate = totalOrders > 0 ? (completedOrders.length / totalOrders) * 100 : 0;
   const avgPrepTime = completedOrders.reduce((acc, order) => {
-    if (order.preparationStartTime && order.preparationEndTime) {
-      const start = new Date(order.preparationStartTime);
-      const end = new Date(order.preparationEndTime);
+    const start = toDate(order.preparationStartTime);
+    const end = toDate(order.preparationEndTime);
+    if (start && end) {
       return acc + (end.getTime() - start.getTime()) / (1000 * 60); // minutes
     }
     return acc;
