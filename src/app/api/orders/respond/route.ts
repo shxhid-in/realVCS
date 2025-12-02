@@ -134,67 +134,50 @@ export async function POST(request: NextRequest) {
       return weight;
     };
 
-    // Calculate revenue for each accepted item and prepare response items for Central API
-    const centralAPIItems = await Promise.all(
-      items.map(async (item: any) => {
-        const responseItem: any = {
-      itemId: item.itemId,
-      ...(item.preparingWeight && { preparingWeight: item.preparingWeight }),
-      ...(item.rejected && { rejected: item.rejected })
-        };
+    // Prepare response items for Central API (revenue will be added after sheet save)
+    const centralAPIItems = items.map((item: any) => {
+      return {
+        itemId: item.itemId,
+        ...(item.preparingWeight && { preparingWeight: item.preparingWeight }),
+        ...(item.rejected && { rejected: item.rejected })
+      };
+    });
 
-        // Calculate revenue for accepted items (items with preparingWeight)
-        if (item.preparingWeight && !item.rejected) {
-          try {
-            // Find the corresponding order item to get name, unit, and size
-            const orderItem = updatedItems.find(oi => oi.id === item.itemId);
-            if (orderItem) {
-              // Parse preparing weight
-              const weight = parseWeightString(item.preparingWeight, orderItem.unit);
-              
-              if (weight > 0) {
-                // Get size from order item, default to 'default' if not present
-                const itemSize = orderItem.size || 'default';
-                
-                // Get purchase price and commission rate (pass size parameter)
-                const purchasePrice = await getPurchasePriceFromMenu(user.butcherId, orderItem.name, itemSize);
-                const commissionRate = getCommissionRate(user.butcherId, orderItem.category || 'default');
-                
-                // Calculate item revenue: (Purchase Price × Weight) - Commission% of (Purchase Price × Weight)
-                const itemRevenue = (purchasePrice * weight) - (commissionRate * purchasePrice * weight);
-                
-                // Round to 2 decimal places
-                responseItem.revenue = parseFloat(itemRevenue.toFixed(2));
-              }
-            }
-          } catch (error) {
-            // Don't include revenue if calculation fails
-          }
+    // Step 1: Calculate revenue and save to sheet immediately (before Central API call)
+    // For completely rejected orders, revenue will be 0
+    const { totalRevenue, itemRevenues } = await saveOrderToSheetAfterAccept(updatedOrder, user.butcherId);
+    
+    // Update order in cache with calculated revenue
+    const orderWithRevenue: Order = {
+      ...updatedOrder,
+      revenue: totalRevenue,
+      itemRevenues: itemRevenues
+    };
+    updateOrderInCache(user.butcherId, orderNo, orderWithRevenue);
+    
+    // Step 2: Add item revenue to Central API response items
+    const centralAPIItemsWithRevenue = centralAPIItems.map((item: any) => {
+      // Find corresponding order item to get name
+      const orderItem = updatedItems.find(oi => oi.id === item.itemId);
+      if (orderItem && itemRevenues) {
+        // Find revenue for this item (itemKey format: itemName_size)
+        const itemSize = orderItem.size || 'default';
+        const itemKey = `${orderItem.name}_${itemSize}`;
+        const itemRevenue = itemRevenues[itemKey];
+        if (itemRevenue !== undefined && itemRevenue > 0) {
+          item.revenue = parseFloat(itemRevenue.toFixed(2));
         }
-
-        return responseItem;
-      })
-    );
-
-    // Send response to Central API
+      }
+      return item;
+    });
+    
+    // Step 3: Send response to Central API (after saving to sheet)
     try {
-      await centralAPIClient.sendOrderResponse(orderNo, butcherName, centralAPIItems);
+      await centralAPIClient.sendOrderResponse(orderNo, butcherName, centralAPIItemsWithRevenue);
       console.log(`[Order] Status updated: ${orderStatus} - Order ${orderNo}`);
       
       // Remove from queue if it was queued
       removeQueuedResponse(orderNo);
-      
-      // Save to sheet after accepting (calculates revenue and stores it)
-      // For completely rejected orders, revenue will be 0
-      const { totalRevenue, itemRevenues } = await saveOrderToSheetAfterAccept(updatedOrder, user.butcherId);
-      
-      // Update order in cache with calculated revenue
-      const orderWithRevenue: Order = {
-        ...updatedOrder,
-        revenue: totalRevenue,
-        itemRevenues: itemRevenues
-      };
-      updateOrderInCache(user.butcherId, orderNo, orderWithRevenue);
       
       // Send SSE update with full order data (includes preparing weights, revenue, etc.)
       const { sendOrderStatusUpdate } = await import('@/lib/sseConnectionManager');
@@ -206,20 +189,8 @@ export async function POST(request: NextRequest) {
         order: orderWithRevenue
       });
     } catch (error: any) {
-      // Queue the response for retry
-      queueResponse(orderNo, butcherName, centralAPIItems);
-      
-      // Still save to sheet (local storage) - calculates revenue and stores it
-      // For completely rejected orders, revenue will be 0
-      const { totalRevenue, itemRevenues } = await saveOrderToSheetAfterAccept(updatedOrder, user.butcherId);
-      
-      // Update order in cache with calculated revenue
-      const orderWithRevenue: Order = {
-        ...updatedOrder,
-        revenue: totalRevenue,
-        itemRevenues: itemRevenues
-      };
-      updateOrderInCache(user.butcherId, orderNo, orderWithRevenue);
+      // Queue the response for retry (sheet already saved)
+      queueResponse(orderNo, butcherName, centralAPIItemsWithRevenue);
       
       // Send SSE update with full order data even if queued
       const { sendOrderStatusUpdate } = await import('@/lib/sseConnectionManager');

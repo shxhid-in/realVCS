@@ -232,38 +232,53 @@ export const saveSalesDataToSheet = async (
     const fishButcher = isFishButcher(butcherId);
     const rejected = (item as any).rejected;
 
-    // Preparing Weight: Format as item: weight or item: rejected
+    // Preparing Weight: Format as item: weight or item: rejected (no curly braces)
     if (rejected) {
       preparingWeightsParts.push(`${itemName}: rejected`);
     } else {
+      // Get preparing weight from itemWeights (fish) or itemQuantities (meat)
+      // For meat butchers, use itemQuantities; for fish butchers, use itemWeights
       const preparingWeight = fishButcher
         ? orderData.itemWeights?.[itemName] ?? item.quantity
         : orderData.itemQuantities?.[itemName] ?? item.quantity;
       
-      // No trimming of unit as per user request
+      // Keep unit as is (no trimming)
       preparingWeightsParts.push(`${itemName}: ${preparingWeight}`);
     }
 
-    // Calculate revenue only for accepted items
+    // Reuse calculated revenue from orderData.itemRevenues (no recalculation)
     if (!rejected) {
-    const preparingWeight = parseFloat(
-      fishButcher
-        ? orderData.itemWeights?.[itemName] ?? item.quantity
-        : orderData.itemQuantities?.[itemName] ?? item.quantity
-    );
-
-    const itemSize = item.size || 'default'; // Get size from order item
-    console.log(`${fishButcher ? 'Fish' : 'Meat'} butcher ${butcherId} - Item: ${itemName} (${itemSize}), final weight: ${preparingWeight}`);
-
-    const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
-    const commissionRate = getCommissionRate(butcherId, item.category || 'default');
-    const itemRevenue = calculateItemRevenue(preparingWeight, purchasePrice, commissionRate);
-
-    console.log(`${itemName} (${itemSize}): ${preparingWeight}kg × ₹${purchasePrice} × (1 - ${commissionRate}) = ₹${itemRevenue}`);
-
-    totalSalesRevenue += itemRevenue;
-      // Revenue: Format as item: revenue
-      revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
+      const itemSize = item.size || 'default'; // Get size from order item
+      const itemKey = `${itemName}_${itemSize}`;
+      
+      // Try to get revenue from orderData.itemRevenues first
+      let itemRevenue = 0;
+      if (orderData.itemRevenues && orderData.itemRevenues[itemKey] !== undefined) {
+        // Reuse calculated revenue
+        itemRevenue = orderData.itemRevenues[itemKey];
+        totalSalesRevenue += itemRevenue;
+        revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
+      } else if (orderData.revenue && orderData.items.length > 0) {
+        // Fallback: If itemRevenues not available but total revenue is, distribute proportionally
+        // This should rarely happen as revenue should be calculated when order is accepted
+        const totalQuantity = orderData.items.reduce((sum: number, i: any) => sum + (i.quantity || 0), 0);
+        const itemProportion = totalQuantity > 0 ? (item.quantity || 0) / totalQuantity : 0;
+        itemRevenue = orderData.revenue * itemProportion;
+        totalSalesRevenue += itemRevenue;
+        revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
+      } else {
+        // Last resort: Calculate revenue (should not happen in normal flow)
+        const preparingWeight = parseFloat(
+          fishButcher
+            ? orderData.itemWeights?.[itemName] ?? item.quantity
+            : orderData.itemQuantities?.[itemName] ?? item.quantity
+        );
+        const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
+        const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+        itemRevenue = calculateItemRevenue(preparingWeight, purchasePrice, commissionRate);
+        totalSalesRevenue += itemRevenue;
+        revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
+      }
     }
 
     itemsList.push(itemName);

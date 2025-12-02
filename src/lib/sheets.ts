@@ -1374,7 +1374,7 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
         const sizes = order.items.map(item => item.size || '').join(', ');
         const cutTypes = order.items.map(item => item.cutType || '').join(', ');
 
-        // Preparing weights: Format as {item: weight} or {item: rejected}
+        // Preparing weights: Format as item: weight or item: rejected (no curly braces)
         const preparingWeights = order.items.map(item => {
             const preparingWeight = (item as any).preparingWeight;
             const rejected = (item as any).rejected;
@@ -1397,7 +1397,7 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
         // Start Time: IST format, human-readable (when order was accepted)
         const startTime = order.preparationStartTime ? getISTDateTime(order.preparationStartTime) : getISTDateTime(new Date());
 
-        // Revenue: Format as {item: revenue} for multiple items, comma-separated
+        // Revenue: Format as item: revenue for multiple items, comma-separated (no curly braces)
         let revenueForSheet = '';
         if (itemRevenues && Object.keys(itemRevenues).length > 0) {
             const revenueParts = Object.entries(itemRevenues)
@@ -1406,6 +1406,9 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
             revenueForSheet = revenueParts.join(', ');
         } else if (totalRevenue > 0) {
             revenueForSheet = totalRevenue.toFixed(2);
+        } else {
+            // For rejected orders, revenue is 0
+            revenueForSheet = '0.00';
         }
 
         const rowData = [
@@ -1415,11 +1418,11 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
             quantities,
             sizes,
             cutTypes,
-            preparingWeights, // Format: {item: weight} or {item: rejected}
+            preparingWeights, // Format: item: weight or item: rejected (no curly braces)
             '', // completion time (empty initially, will be set when order is completed)
             startTime, // start time in IST format
             sheetStatus, // Only "completed" or "rejected"
-            revenueForSheet // Format: {item: revenue}, {item: revenue}
+            revenueForSheet // Format: item: revenue, item: revenue (no curly braces)
         ];
 
         // Append to the specific tab
@@ -1594,16 +1597,16 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         }
 
         // Prepare update data based on butcher type
-        // Format preparing weight: {item: weight} or {item: rejected}
+        // Format preparing weight: item: weight or item: rejected (no curly braces)
         let preparingWeight = '';
         
-        // Build preparing weight string in format: {item: weight} or {item: rejected}
+        // Build preparing weight string in format: item: weight or item: rejected (no curly braces)
         const preparingWeightParts: string[] = [];
         order.items.forEach(item => {
             const rejected = (item as any).rejected;
             if (rejected) {
-                // Item rejected: {item: rejected}
-                preparingWeightParts.push(`{${item.name}: rejected}`);
+                // Item rejected: item: rejected
+                preparingWeightParts.push(`${item.name}: rejected`);
             } else {
                 // Item accepted: get preparing weight
                 let weight = '';
@@ -1613,16 +1616,33 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                     weight = order.itemWeights?.[item.name] || '';
                 }
                 if (weight) {
-                    // Remove unit if present (e.g., "1.5kg" -> "1.5")
-                    const weightValue = weight.replace(/kg|nos|g/gi, '').trim();
-                    preparingWeightParts.push(`{${item.name}: ${weightValue}}`);
+                    // Keep unit as is (no trimming)
+                    preparingWeightParts.push(`${item.name}: ${weight}`);
                 }
             }
         });
         preparingWeight = preparingWeightParts.join(', ');
             
-        // Completion Time: Time taken if within 20min, or actual IST time if exceeded
-        const completionTime = getCompletionTime(order.preparationStartTime, order.preparationEndTime);
+        // Completion Time: 
+        // - For preparing orders: Show elapsed minutes countdown (e.g., "5min")
+        // - For completed orders: Time taken if within 20min, or actual IST time if exceeded
+        let completionTime = '';
+        if (order.status === 'preparing' || order.status === 'prepared') {
+            // Order is still preparing - calculate elapsed time from start to now
+            if (order.preparationStartTime) {
+                const now = new Date();
+                const start = order.preparationStartTime instanceof Date 
+                    ? order.preparationStartTime 
+                    : new Date(order.preparationStartTime);
+                const diffMs = now.getTime() - start.getTime();
+                const diffMinutes = Math.floor(diffMs / (1000 * 60));
+                // Show elapsed minutes (countdown) for preparing orders
+                completionTime = `${diffMinutes}min`;
+            }
+        } else {
+            // Order is completed - use normal completion time calculation
+            completionTime = getCompletionTime(order.preparationStartTime, order.preparationEndTime);
+        }
         
         // Start Time: IST format, human-readable (when order was accepted)
         const startTime = order.preparationStartTime ? getISTDateTime(order.preparationStartTime) : '';
@@ -1643,20 +1663,20 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             sheetStatus = 'completed';
         }
         
-        // Revenue: Format as {item: revenue} for multiple items, comma-separated
+        // Revenue: Format as item: revenue for multiple items, comma-separated (no curly braces)
+        // Reuse calculated revenue from order.itemRevenues - no recalculation
         let revenueForSheet = '';
         if (order.itemRevenues && Object.keys(order.itemRevenues).length > 0) {
-            // Format: {item: revenue}, {item: revenue}
+            // Format: item: revenue, item: revenue (no curly braces)
             const revenueParts = Object.entries(order.itemRevenues)
                 .filter(([itemName, revenue]) => revenue > 0) // Only include items with revenue
-                .map(([itemName, revenue]) => `{${itemName}: ${revenue.toFixed(2)}}`);
+                .map(([itemName, revenue]) => `${itemName}: ${revenue.toFixed(2)}`);
             revenueForSheet = revenueParts.join(', ');
         } else if (order.revenue && order.revenue > 0) {
-            // Fallback: If only total revenue available, distribute equally (or use total)
-            // For now, just use total as single value
+            // Fallback: If only total revenue available, use total
             revenueForSheet = order.revenue.toFixed(2);
         } else {
-            // No revenue calculated yet
+            // No revenue calculated yet (should not happen for completed orders)
             revenueForSheet = '';
         }
 

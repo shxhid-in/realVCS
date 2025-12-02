@@ -1592,13 +1592,13 @@ const OrderCard = ({
                                                     </Badge>
                                                 )}
                                             {item.size && (
-                                                    <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                                    <Badge variant="outline" className="text-sm px-2.5 py-1 border-2 border-blue-300 dark:border-blue-500 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800">
                                                     Size: {item.size}
                                                     </Badge>
                                             )}
                                             {item.cutType && (
-                                                    <Badge variant="outline" className="text-sm px-2 py-0.5">
-                                                        {item.cutType}
+                                                    <Badge variant="outline" className="text-sm font-semibold px-3 py-1.5 bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-2 border-blue-400 dark:border-blue-600 shadow-sm">
+                                                    Preference: {item.cutType}
                                                     </Badge>
                                             )}
                                     </div>
