@@ -4,8 +4,8 @@ import { getDAMTargetFromSheet, saveDAMTargetToSheet } from '@/lib/salesSheets';
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const month = parseInt(searchParams.get('month') || '1');
-    const year = parseInt(searchParams.get('year') || new Date().getFullYear());
+    const month = parseInt(searchParams.get('month') || '1', 10);
+    const year = parseInt(searchParams.get('year') || String(new Date().getFullYear()), 10);
 
     const target = await getDAMTargetFromSheet(month, year);
     
