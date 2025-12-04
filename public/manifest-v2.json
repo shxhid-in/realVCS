@@ -1,7 +1,7 @@
 {
-  "name": "ButcherBot POS - Mobile",
-  "short_name": "ButcherBot",
-  "description": "A Modern Point of Sale System for Butchers - Mobile Optimized",
+  "name": "Vendor Communication System",
+  "short_name": "VCS",
+  "description": "Vendor Communication System - A Modern Point of Sale System for Butchers",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

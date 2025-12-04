@@ -282,6 +282,74 @@ export default function AnalyticsPage() {
     return 0;
   };
   
+  // Helper function to get preparing weight for a specific item from an order
+  const getItemPreparingWeight = (order: Order, itemName: string): number => {
+    // Priority 1: Use itemWeights (for fish butchers) - get weight for this specific item
+    if (order.itemWeights && order.itemWeights[itemName]) {
+      const weightStr = order.itemWeights[itemName];
+      if (weightStr && weightStr !== 'rejected') {
+        // Parse weight string like "2kg" or "1.5kg" -> extract number
+        const match = weightStr.toString().match(/(\d+\.?\d*)/);
+        if (match) {
+          return parseFloat(match[1]);
+        }
+      }
+    }
+    
+    // Priority 2: Use itemQuantities (for meat butchers) - get quantity for this specific item
+    if (order.itemQuantities && order.itemQuantities[itemName]) {
+      const qtyStr = order.itemQuantities[itemName];
+      if (qtyStr && qtyStr !== 'rejected') {
+        // Parse quantity string like "2kg" or "1.5kg" -> extract number
+        const match = qtyStr.toString().match(/(\d+\.?\d*)/);
+        if (match) {
+          return parseFloat(match[1]);
+        }
+      }
+    }
+    
+    // Priority 3: Fall back to item's original quantity
+    const item = order.items.find(i => i.name === itemName);
+    return item ? item.quantity : 0;
+  };
+
+  // Helper function to calculate total preparing weight from an order
+  const calculateOrderPreparingWeight = (order: Order): number => {
+    // Priority 1: Use itemWeights (for fish butchers) - sum all preparing weights
+    if (order.itemWeights && Object.keys(order.itemWeights).length > 0) {
+      return Object.values(order.itemWeights).reduce((total, weightStr) => {
+        if (!weightStr || weightStr === 'rejected') return total;
+        // Parse weight string like "2kg" or "1.5kg" -> extract number
+        const match = weightStr.toString().match(/(\d+\.?\d*)/);
+        if (match) {
+          return total + parseFloat(match[1]);
+        }
+        return total;
+      }, 0);
+    }
+    
+    // Priority 2: Use itemQuantities (for meat butchers) - sum all preparing quantities
+    if (order.itemQuantities && Object.keys(order.itemQuantities).length > 0) {
+      return Object.values(order.itemQuantities).reduce((total, qtyStr) => {
+        if (!qtyStr || qtyStr === 'rejected') return total;
+        // Parse quantity string like "2kg" or "1.5kg" -> extract number
+        const match = qtyStr.toString().match(/(\d+\.?\d*)/);
+        if (match) {
+          return total + parseFloat(match[1]);
+        }
+        return total;
+      }, 0);
+    }
+    
+    // Priority 3: Use pickedWeight if available
+    if (order.pickedWeight) {
+      return order.pickedWeight;
+    }
+    
+    // Priority 4: Fall back to sum of item quantities
+    return order.items.reduce((sum, item) => sum + item.quantity, 0);
+  };
+
   // Calculate total revenue including declined orders (negative revenue)
   const completedRevenue = completedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const declinedRevenue = declinedOrders.reduce((acc, order) => {
@@ -297,7 +365,7 @@ export default function AnalyticsPage() {
   
   // Calculate total weight sold from preparing weights
   const totalWeightSold = completedOrders.reduce((acc, order) => {
-    return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
+    return acc + calculateOrderPreparingWeight(order);
   }, 0);
   
   // Calculate preparation time only for orders that have both start and end times
@@ -325,7 +393,7 @@ export default function AnalyticsPage() {
   const weeklyDeclinedOrders = weeklyOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
   const weeklyRevenue = weeklyCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const weeklyWeightSold = weeklyCompletedOrders.reduce((acc, order) => {
-    return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
+    return acc + calculateOrderPreparingWeight(order);
   }, 0);
 
   // Daily breakdown for the week (Monday to Sunday)
@@ -342,7 +410,7 @@ export default function AnalyticsPage() {
     const dayCompletedOrders = dayOrders.filter(o => ['completed', 'prepared'].includes(o.status));
     const dayRevenue = dayCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
     const dayWeight = dayCompletedOrders.reduce((acc, order) => {
-      return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
+      return acc + calculateOrderPreparingWeight(order);
     }, 0);
 
     dailyBreakdown.push({
@@ -360,7 +428,7 @@ export default function AnalyticsPage() {
   const monthlyDeclinedOrders = monthlyOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
   const monthlyRevenue = monthlyCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const monthlyWeightSold = monthlyCompletedOrders.reduce((acc, order) => {
-    return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
+    return acc + calculateOrderPreparingWeight(order);
   }, 0);
 
   // Weekly breakdown for the month
@@ -385,7 +453,7 @@ export default function AnalyticsPage() {
     const weekCompletedOrders = weekOrders.filter(o => ['completed', 'prepared'].includes(o.status));
     const weekRevenue = weekCompletedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
     const weekWeight = weekCompletedOrders.reduce((acc, order) => {
-      return acc + (order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0));
+      return acc + calculateOrderPreparingWeight(order);
     }, 0);
 
     weeklyBreakdown.push({
@@ -411,21 +479,53 @@ export default function AnalyticsPage() {
 
   // Calculate item-wise statistics for today only
   // completedOrders is already filtered to today's orders
+  // Use actual preparing weights for each item instead of proportional distribution
   const itemStats = completedOrders.reduce((acc, order) => {
     const orderRevenue = calculateOrderRevenueAnalytics(order);
-    const orderWeight = order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0);
     
-    order.items.forEach((item, index) => {
+    order.items.forEach((item) => {
+      // Skip rejected items
+      if ((item as any).rejected) {
+        return;
+      }
+      
       if (!acc[item.name]) {
         acc[item.name] = { totalWeight: 0, totalRevenue: 0, count: 0 };
       }
       
-      // Distribute weight and revenue proportionally based on item quantity
-      const itemProportion = item.quantity / order.items.reduce((sum, i) => sum + i.quantity, 0);
-      const itemWeight = orderWeight * itemProportion;
-      const itemRevenue = orderRevenue * itemProportion;
+      // Get actual preparing weight for this specific item
+      const itemPreparingWeight = getItemPreparingWeight(order, item.name);
       
-      acc[item.name].totalWeight += itemWeight;
+      // Calculate item revenue from order.itemRevenues if available
+      // Revenue is stored with key format: "itemName_size" (e.g., "black pomfret_small")
+      let itemRevenue = 0;
+      if (order.itemRevenues) {
+        const itemSize = item.size || 'default';
+        const itemKey = `${item.name}_${itemSize}`;
+        // Try the full key first (itemName_size)
+        if (order.itemRevenues[itemKey] !== undefined) {
+          itemRevenue = order.itemRevenues[itemKey];
+        } else if (order.itemRevenues[item.name] !== undefined) {
+          // Fallback: Try just item name (for backward compatibility)
+          itemRevenue = order.itemRevenues[item.name];
+        } else {
+          // If no item-specific revenue, distribute proportionally based on preparing weights
+          const totalOrderWeight = calculateOrderPreparingWeight(order);
+          if (totalOrderWeight > 0) {
+            const itemProportion = itemPreparingWeight / totalOrderWeight;
+            itemRevenue = orderRevenue * itemProportion;
+          }
+        }
+      } else {
+        // If no itemRevenues, distribute proportionally based on preparing weights
+        const totalOrderWeight = calculateOrderPreparingWeight(order);
+        if (totalOrderWeight > 0) {
+          const itemProportion = itemPreparingWeight / totalOrderWeight;
+          itemRevenue = orderRevenue * itemProportion;
+        }
+      }
+      
+      acc[item.name].totalWeight += itemPreparingWeight;
       acc[item.name].totalRevenue += itemRevenue;
       acc[item.name].count += 1;
     });
@@ -570,7 +670,7 @@ export default function AnalyticsPage() {
                 </TableHeader>
                 <TableBody>
                   {deduplicatedTodayOrders.length > 0 ? deduplicatedTodayOrders.map((order, index) => (
-                    <TableRow key={`${order.id}-${index}`}> {/* ✅ FIX: Use unique key with index */}
+                    <TableRow key={`${order.id}-${index}`}>
                       <TableCell className="font-medium">{getDisplayOrderId(order.id)}</TableCell>
                       <TableCell>{getStatusBadge(order)}</TableCell>
                       <TableCell>{getPrepTime(order)}</TableCell>
@@ -579,11 +679,11 @@ export default function AnalyticsPage() {
                       </TableCell>
                     </TableRow>
                   )) : (
-                     <TableRow>
-                       <TableCell colSpan={4} className="h-24 text-center">
-                         No orders today.
-                       </TableCell>
-                     </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={4} className="h-24 text-center">
+                        No orders today.
+                      </TableCell>
+                    </TableRow>
                   )}
                 </TableBody>
               </Table>

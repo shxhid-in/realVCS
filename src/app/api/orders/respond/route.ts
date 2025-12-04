@@ -107,13 +107,32 @@ export async function POST(request: NextRequest) {
       orderStatus = 'rejected';
     }
 
+    // Build itemWeights/itemQuantities from item.preparingWeight for cache storage
+    // This ensures preparing weights are available when marking as prepared
+    const itemWeights: {[itemName: string]: string} = {};
+    const itemQuantities: {[itemName: string]: string} = {};
+    const isMeat = ['usaj', 'usaj_mutton', 'pkd', 'test_meat'].includes(user.butcherId);
+    
+    updatedItems.forEach(item => {
+      const preparingWeight = (item as any).preparingWeight;
+      if (preparingWeight && !(item as any).rejected) {
+        if (isMeat) {
+          itemQuantities[item.name] = preparingWeight;
+        } else {
+          itemWeights[item.name] = preparingWeight;
+        }
+      }
+    });
+
     // Update order in cache
     const updatedOrder: Order = {
       ...order,
       items: updatedItems,
       status: orderStatus,
       ...(allItemsRejected && rejectionReason ? { rejectionReason } : {}),
-      ...(orderStatus === 'preparing' ? { preparationStartTime: new Date() } : {})
+      ...(orderStatus === 'preparing' ? { preparationStartTime: new Date() } : {}),
+      // Store preparing weights in itemWeights/itemQuantities for easy access when marking as prepared
+      ...(isMeat ? { itemQuantities } : { itemWeights })
     };
 
     updateOrderInCache(user.butcherId, orderNo, updatedOrder);
@@ -137,24 +156,26 @@ export async function POST(request: NextRequest) {
     // Prepare response items for Central API (revenue will be added after sheet save)
     const centralAPIItems = items.map((item: any) => {
       return {
-        itemId: item.itemId,
-        ...(item.preparingWeight && { preparingWeight: item.preparingWeight }),
-        ...(item.rejected && { rejected: item.rejected })
+      itemId: item.itemId,
+      ...(item.preparingWeight && { preparingWeight: item.preparingWeight }),
+      ...(item.rejected && { rejected: item.rejected })
       };
     });
-
+      
     // Step 1: Calculate revenue and save to sheet immediately (before Central API call)
-    // For completely rejected orders, revenue will be 0
-    const { totalRevenue, itemRevenues } = await saveOrderToSheetAfterAccept(updatedOrder, user.butcherId);
-    
-    // Update order in cache with calculated revenue
-    const orderWithRevenue: Order = {
-      ...updatedOrder,
-      revenue: totalRevenue,
-      itemRevenues: itemRevenues
-    };
-    updateOrderInCache(user.butcherId, orderNo, orderWithRevenue);
-    
+      // For completely rejected orders, revenue will be 0
+      const { totalRevenue, itemRevenues } = await saveOrderToSheetAfterAccept(updatedOrder, user.butcherId);
+      
+      // Update order in cache with calculated revenue (preserve itemWeights/itemQuantities)
+      const orderWithRevenue: Order = {
+        ...updatedOrder,
+        revenue: totalRevenue,
+        itemRevenues: itemRevenues,
+        // Preserve itemWeights/itemQuantities that were set above
+        ...(isMeat ? { itemQuantities } : { itemWeights })
+      };
+      updateOrderInCache(user.butcherId, orderNo, orderWithRevenue);
+      
     // Step 2: Add item revenue to Central API response items
     const centralAPIItemsWithRevenue = centralAPIItems.map((item: any) => {
       // Find corresponding order item to get name

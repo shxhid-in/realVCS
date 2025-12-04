@@ -268,16 +268,16 @@ export const saveSalesDataToSheet = async (
         revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
       } else {
         // Last resort: Calculate revenue (should not happen in normal flow)
-        const preparingWeight = parseFloat(
-          fishButcher
-            ? orderData.itemWeights?.[itemName] ?? item.quantity
-            : orderData.itemQuantities?.[itemName] ?? item.quantity
-        );
+    const preparingWeight = parseFloat(
+      fishButcher
+        ? orderData.itemWeights?.[itemName] ?? item.quantity
+        : orderData.itemQuantities?.[itemName] ?? item.quantity
+    );
         const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
-        const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+    const commissionRate = getCommissionRate(butcherId, item.category || 'default');
         itemRevenue = calculateItemRevenue(preparingWeight, purchasePrice, commissionRate);
-        totalSalesRevenue += itemRevenue;
-        revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
+    totalSalesRevenue += itemRevenue;
+      revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);
       }
     }
 

@@ -87,12 +87,12 @@ export async function POST(request: NextRequest) {
       // For meat butchers, keep the single name as is
       
       return {
-        id: item.itemId, // "57788-1"
+      id: item.itemId, // "57788-1"
         name: displayName,
-        quantity: item.quantityParsed.value,
-        unit: item.quantityParsed.unit as 'kg' | 'g' | 'nos',
-        size: item.size || undefined,
-        cutType: item.cutType || undefined
+      quantity: item.quantityParsed.value,
+      unit: item.quantityParsed.unit as 'kg' | 'g' | 'nos',
+      size: item.size || undefined,
+      cutType: item.cutType || undefined
       };
     });
 

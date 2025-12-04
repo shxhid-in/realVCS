@@ -1494,7 +1494,10 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         let rowIndex = -1;
         
         const orderNoStr = String(orderNo);
-        for (let i = 1; i < rows.length; i++) { // Start from 1 to skip header
+        // CRITICAL FIX: Range A2:G means rows start from sheet row 2
+        // rows[0] = sheet row 2, rows[1] = sheet row 3, etc.
+        // So rowIndex = i + 2 (not i + 1)
+        for (let i = 0; i < rows.length; i++) { // Start from 0 since range already starts at row 2
             const rowDate = rows[i][0]; // Order Date is in column A (index 0)
             const rowOrderNo = rows[i][1]; // Order No is in column B (index 1)
             
@@ -1503,7 +1506,7 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             
             // Match both date and order number to ensure uniqueness
             if (rowDate === orderDate && rowOrderNoStr === orderNoStr) {
-                rowIndex = i + 1; // Sheet rows are 1-indexed
+                rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
                 break;
             }
         }
@@ -1520,13 +1523,15 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             
             for (let altDate of alternativeDates) {
                 const orderNoStr = String(orderNo);
-                for (let i = 1; i < rows.length; i++) {
+                // CRITICAL FIX: Range A2:G means rows start from sheet row 2
+                // rows[0] = sheet row 2, rows[1] = sheet row 3, etc.
+                for (let i = 0; i < rows.length; i++) {
                     const rowDate = rows[i][0];
                     const rowOrderNo = rows[i][1];
                     const rowOrderNoStr = String(rowOrderNo || '').trim();
                     
                     if (rowDate === altDate && rowOrderNoStr === orderNoStr) {
-                        rowIndex = i + 1;
+                        rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
                         break;
                     }
                 }
@@ -1535,20 +1540,28 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         }
         
         if (rowIndex === -1) {
-            // Don't create duplicate orders! 
-            // If order is being completed, it should already exist in the sheet from when it was accepted.
-            // Only create if it's a truly new order (status is 'new' or 'preparing' without data)
-            // For completed orders, if they're not found, log a warning but don't create duplicates
-            if (order.status === 'completed' || order.status === 'prepared') {
+            // CRITICAL: Never create duplicate rows for completed/prepared orders
+            // These orders MUST already exist in the sheet from when they were accepted
+            if (order.status === 'completed' || order.status === 'prepared' || order.status === 'ready to pick up') {
+                console.warn(`[Order] Cannot find order ${orderNo} in sheet for completion. Order should have been saved when accepted. Skipping update to prevent duplicate.`);
                 return; // Exit early - don't create duplicate
             }
             
             // Only create new orders if they're truly new (status is 'new' or 'preparing' without accepted data)
+            // But NEVER create if order has revenue (means it was already accepted and should exist)
+            const hasRevenue = (order.revenue && order.revenue > 0) || 
+                              (order.itemRevenues && Object.keys(order.itemRevenues).length > 0);
+            
+            if (hasRevenue) {
+                // Order has revenue, meaning it was already accepted and should exist in sheet
+                // Don't create duplicate - just return
+                console.warn(`[Order] Cannot find order ${orderNo} in sheet but order has revenue. Order should already exist. Skipping update to prevent duplicate.`);
+                return;
+            }
+            
             try {
-                // Check if order has been accepted (has revenue, weights, or item data)
-                // If it has data, use saveOrderToSheetAfterAccept, otherwise use saveOrderToSheet
-                const hasOrderData = (order.revenue && order.revenue > 0) || 
-                                   (order.itemWeights && Object.keys(order.itemWeights).length > 0) ||
+                // Check if order has been accepted (has weights, or item data)
+                const hasOrderData = (order.itemWeights && Object.keys(order.itemWeights).length > 0) ||
                                    (order.itemQuantities && Object.keys(order.itemQuantities).length > 0) ||
                                    order.items.some(item => (item as any).preparingWeight || (item as any).rejected);
                 
@@ -1576,13 +1589,15 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                 
                 const newRows = newResponse.data.values || [];
                 const orderNoStr = String(orderNo);
-                for (let i = 1; i < newRows.length; i++) {
+                // CRITICAL FIX: Range A2:G means rows start from sheet row 2
+                // rows[0] = sheet row 2, rows[1] = sheet row 3, etc.
+                for (let i = 0; i < newRows.length; i++) {
                     const rowDate = newRows[i][0];
                     const rowOrderNo = newRows[i][1];
                     const rowOrderNoStr = String(rowOrderNo || '').trim();
                     
                     if (rowDate === orderDate && rowOrderNoStr === orderNoStr) {
-                        rowIndex = i + 1;
+                        rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
                         break;
                     }
                 }
@@ -1601,6 +1616,8 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         let preparingWeight = '';
         
         // Build preparing weight string in format: item: weight or item: rejected (no curly braces)
+        // Preparing weights are keyed by item.name in order.itemWeights (fish) or order.itemQuantities (meat)
+        // Values are already formatted with units (e.g., "2.1kg") from the dashboard dialog
         const preparingWeightParts: string[] = [];
         order.items.forEach(item => {
             const rejected = (item as any).rejected;
@@ -1608,15 +1625,30 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                 // Item rejected: item: rejected
                 preparingWeightParts.push(`${item.name}: rejected`);
             } else {
-                // Item accepted: get preparing weight
+                // Item accepted: get preparing weight from multiple sources
+                // Priority 1: order.itemWeights/itemQuantities (set when marked as prepared)
+                // Priority 2: item.preparingWeight (set when order was accepted)
+                // Priority 3: original item.quantity (fallback)
                 let weight = '';
-        if (isMeat) {
+                if (isMeat) {
                     weight = order.itemQuantities?.[item.name] || '';
-        } else {
+                } else {
                     weight = order.itemWeights?.[item.name] || '';
                 }
+                
+                // Fallback to item.preparingWeight if not found in order.itemWeights/itemQuantities
+                // This handles orders that were accepted but itemWeights/itemQuantities weren't set
+                if (!weight) {
+                    weight = (item as any).preparingWeight || '';
+                }
+                
+                // If still no weight, use original quantity with unit (shouldn't happen for prepared orders)
+                if (!weight) {
+                    weight = `${item.quantity}${item.unit}`;
+                }
+                
                 if (weight) {
-                    // Keep unit as is (no trimming)
+                    // Weight already includes unit from dashboard (e.g., "2.1kg" or "2.65kg"), use as is
                     preparingWeightParts.push(`${item.name}: ${weight}`);
                 }
             }
@@ -2437,18 +2469,34 @@ export const completeOrder = async (order: Order, butcherId: string): Promise<vo
   }
   
   try {
+    // Extract order number from order ID to get cached order with preparing weights
+    const orderIdParts = order.id.replace('ORD-', '').split('-');
+    const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10);
+    
+    // Get the full order from cache FIRST to preserve preparing weights (itemWeights/itemQuantities)
+    // The cached order has the preparing weights that were set when the order was accepted
+    const { getOrderFromCache } = await import('./orderCache');
+    const cachedOrder = getOrderFromCache(butcherId, orderNo);
+    
+    // Use cached order as base (has preparing weights), merge with incoming order updates
+    // This ensures preparing weights are preserved when marking as completed
+    const orderWithWeights = cachedOrder ? {
+      ...cachedOrder, // Use cached order as base (has itemWeights/itemQuantities)
+      ...order, // Apply any updates from incoming order
+    } : order; // Fallback to incoming order if not in cache
+    
     // Step 1: Update order status to completed
     // Ensure preparationStartTime is set (use current time if not set)
     const now = new Date();
     const completedOrder = {
-      ...order,
+      ...orderWithWeights,
       status: 'completed' as const,
       completionTime: Date.now(), // Use timestamp instead of string
-      preparationStartTime: order.preparationStartTime || now, // Set start time if not already set
+      preparationStartTime: orderWithWeights.preparationStartTime || now, // Set start time if not already set
       preparationEndTime: now // Set end time for completion time calculation
     };
     
-    // Step 2: Update butcher sheet with completed status
+    // Step 2: Update butcher sheet with completed status (preserving preparing weights)
     await updateOrderInSheet(completedOrder, butcherId);
     
     // Step 3: Save to sales sheet with all order details

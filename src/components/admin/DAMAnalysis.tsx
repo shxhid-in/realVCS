@@ -228,8 +228,8 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
           const start = toDate(order.preparationStartTime);
           const end = toDate(order.preparationEndTime);
           if (start && end) {
-            const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
-            completionTime = diffMinutes <= 20 ? `${diffMinutes}min` : orderDateStr;
+          const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+          completionTime = diffMinutes <= 20 ? `${diffMinutes}min` : orderDateStr;
           }
         }
         

@@ -1,8 +1,13 @@
-const CACHE_NAME = 'butcherbot-pos-v1';
-const STATIC_CACHE_NAME = 'butcherbot-static-v1';
-const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v1';
+// Service Worker Version - Increment this on every deployment to force updates
+// Format: YYYY.MM.DD-RELEASE_NUMBER
+const SW_VERSION = '2025.01.03-1';
+
+// Cache names - Increment version numbers on each deployment to clear old caches
+const STATIC_CACHE_NAME = 'butcherbot-static-v2';
+const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v2';
 
 // Files to cache for offline functionality
+// Note: For Next.js, these routes will be cached as HTML pages
 const STATIC_FILES = [
   '/',
   '/dashboard',
@@ -12,17 +17,9 @@ const STATIC_FILES = [
   '/admin'
 ];
 
-// API routes that should be cached
-const API_ROUTES = [
-  '/api/health',
-  '/api/menu',
-  '/api/orders',
-  '/api/notifications'
-];
-
 // Install event - cache static files
 self.addEventListener('install', (event) => {
-  console.log('Service Worker: Installing...');
+  console.log(`Service Worker v${SW_VERSION}: Installing...`);
   event.waitUntil(
     caches.open(STATIC_CACHE_NAME)
       .then((cache) => {
@@ -47,24 +44,31 @@ self.addEventListener('install', (event) => {
 });
 
 // Activate event - clean up old caches
+// IMPORTANT: Cache cleanup must happen BEFORE clients.claim() to ensure old caches are deleted
+// before the new service worker takes control
 self.addEventListener('activate', (event) => {
-  console.log('Service Worker: Activating...');
+  console.log(`Service Worker v${SW_VERSION}: Activating...`);
   event.waitUntil(
-    caches.keys()
-      .then((cacheNames) => {
-        return Promise.all(
-          cacheNames.map((cacheName) => {
-            if (cacheName !== STATIC_CACHE_NAME && cacheName !== DYNAMIC_CACHE_NAME) {
-              console.log('Service Worker: Deleting old cache', cacheName);
-              return caches.delete(cacheName);
-            }
-          })
-        );
-      })
-      .then(() => {
-        console.log('Service Worker: Activated');
-        return self.clients.claim();
-      })
+    (async () => {
+      // Step 1: Get all cache names
+      const cacheNames = await caches.keys();
+      
+      // Step 2: Delete all old caches (except current ones)
+      await Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== STATIC_CACHE_NAME && cacheName !== DYNAMIC_CACHE_NAME) {
+            console.log('Service Worker: Deleting old cache', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+      
+      // Step 3: Take control of all clients (TWA/PWA)
+      // This ensures the new service worker is active immediately
+      await self.clients.claim();
+      
+      console.log('Service Worker: Activated and claimed all clients');
+    })()
   );
 });
 
