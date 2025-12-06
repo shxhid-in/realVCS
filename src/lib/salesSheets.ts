@@ -273,8 +273,10 @@ export const saveSalesDataToSheet = async (
         ? orderData.itemWeights?.[itemName] ?? item.quantity
         : orderData.itemQuantities?.[itemName] ?? item.quantity
     );
-        const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
-    const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+        const { price: purchasePrice, category: menuCategory } = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
+        // Use category from menu (found when looking up price) instead of item.category
+        const category = menuCategory || item.category || 'default';
+        const commissionRate = getCommissionRate(butcherId, category);
         itemRevenue = calculateItemRevenue(preparingWeight, purchasePrice, commissionRate);
     totalSalesRevenue += itemRevenue;
       revenueParts.push(`${itemName}: ${itemRevenue.toFixed(2)}`);

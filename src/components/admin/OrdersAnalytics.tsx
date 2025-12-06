@@ -249,11 +249,9 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
   // Get purchase price for a single item
   const getPurchasePriceFromMenu = async (butcherId: string, itemName: string, size: string = 'default'): Promise<number> => {
     try {
-      // For now, we'll use getItemPurchasePricesFromSheet which doesn't support size
-      // In the future, this should be updated to use the actual getPurchasePriceFromMenu from sheets.ts
-      // that supports size parameter, or getItemPurchasePricesFromSheet should be updated to support size
-      const purchasePrices = await getItemPurchasePricesFromSheet(butcherId, [itemName]);
-      const price = purchasePrices[itemName] || 0;
+      // Import the actual getPurchasePriceFromMenu from sheets.ts which now returns { price, category }
+      const { getPurchasePriceFromMenu: getPriceFromMenu } = await import('@/lib/sheets');
+      const { price } = await getPriceFromMenu(butcherId, itemName, size);
       return price;
     } catch (error) {
       return 0;

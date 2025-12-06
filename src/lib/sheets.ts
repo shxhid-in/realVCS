@@ -2359,16 +2359,18 @@ const calculateRevenueFromPreparingWeights = async (
     }
     
     try {
-      // Get purchase price and commission rate (pass size parameter)
-      const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
-      const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+      // Get purchase price and category from menu (pass size parameter)
+      const { price: purchasePrice, category: menuCategory } = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
+      // Use category from menu (found when looking up price) instead of item.category
+      const category = menuCategory || item.category || 'default';
+      const commissionRate = getCommissionRate(butcherId, category);
       
       // Debug logging for revenue calculation
       console.log(`[calculateRevenueFromPreparingWeights] Revenue calculation for ${itemName}:`, {
         butcherId,
         itemName,
         itemSize,
-        category: item.category || 'default',
+        category: category,
         purchasePrice,
         commissionRate: `${(commissionRate * 100).toFixed(1)}%`,
         weight,
@@ -2428,9 +2430,11 @@ export const calculateOrderRevenue = async (order: Order, butcherId: string): Pr
     
     console.log(`Calculating revenue for ${itemName} (${itemSize}): ${preparingWeight}kg (${fishButcher ? 'fish' : 'meat'} butcher)`);
     
-    // Get purchase price and commission rate (pass size parameter)
-    const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
-    const commissionRate = getCommissionRate(butcherId, item.category || 'default');
+    // Get purchase price and category from menu (pass size parameter)
+    const { price: purchasePrice, category: menuCategory } = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
+    // Use category from menu (found when looking up price) instead of item.category
+    const category = menuCategory || item.category || 'default';
+    const commissionRate = getCommissionRate(butcherId, category);
     
     // Calculate item revenue: (Purchase Price × Weight) - Commission% of (Purchase Price × Weight)
     const itemRevenue = (purchasePrice * preparingWeight) - (commissionRate * purchasePrice * preparingWeight);
@@ -2744,7 +2748,7 @@ export const getPurchasePriceFromMenu = async (
   butcherId: string,
   itemName: string,
   size: string = 'default'
-): Promise<number> => {
+): Promise<{ price: number; category: string }> => {
   // Butcher name mapping
   const butcherNames: Record<string, string> = {
     'usaj': 'Usaj_Meat_Hub',
@@ -2763,7 +2767,7 @@ export const getPurchasePriceFromMenu = async (
     const spreadsheetId = process.env.MENU_POS_SHEET_ID;
     if (!spreadsheetId) {
       console.error('Menu POS Spreadsheet ID not found');
-      return 0;
+      return { price: 0, category: 'default' };
     }
     
     // Determine if this is a meat butcher
@@ -2827,7 +2831,8 @@ export const getPurchasePriceFromMenu = async (
               parsedPrice: price
             });
             if (price > 0) {
-              return price;
+              const category = (row[1] || 'default').trim();
+              return { price, category };
             }
           }
         }
@@ -2839,7 +2844,8 @@ export const getPurchasePriceFromMenu = async (
             if (row.length > priceColumn) {
               const price = parseFloat(row[priceColumn]) || 0;
               if (price > 0) {
-              return price;
+                const category = (row[1] || 'default').trim();
+                return { price, category };
               }
             }
           } else {
@@ -2849,7 +2855,8 @@ export const getPurchasePriceFromMenu = async (
               if (menuSize === normalizedSize) {
                 const price = parseFloat(row[priceColumn]) || 0;
                 if (price > 0) {
-                  return price;
+                  const category = (row[1] || 'default').trim();
+                  return { price, category };
                 }
               }
             }
@@ -2871,19 +2878,18 @@ export const getPurchasePriceFromMenu = async (
           if (row.length > priceColumn) {
             const price = parseFloat(row[priceColumn]) || 0;
             if (price > 0) {
-              const menuSize = row.length > sizeColumn ? (row[sizeColumn] || 'any') : 'any';
-              return price;
+              const category = (row[1] || 'default').trim();
+              return { price, category };
             }
           }
         }
       }
     }
     
-    // No match found - return 0
-    
-    return 0;
+    // No match found - return 0 with default category
+    return { price: 0, category: 'default' };
   } catch (error) {
     console.error(`[Order] Error fetching purchase price for "${itemName}" in ${butcherId}:`, error);
-    return 0;
+    return { price: 0, category: 'default' };
   }
 };

@@ -92,7 +92,7 @@ export const getDefaultButcherRates = (): ButcherRates[] => {
 
 // Get commission rate for a specific butcher and category
 export const getCommissionRate = (butcherId: string, category: string, customRates?: CommissionRate[]): number => {
-  const rates = DEFAULT_COMMISSION_RATES;
+  const rates = customRates || DEFAULT_COMMISSION_RATES;
   const categoryLower = category.toLowerCase();
   
   // Try exact match first (case-insensitive)
@@ -106,8 +106,13 @@ export const getCommissionRate = (butcherId: string, category: string, customRat
       r.category.toLowerCase().includes(categoryLower)
     ));
   }
-  
-  return rate ? rate.rate : 0.07; // Default to 7% if not found
+  // If still no rate found, log error and return default
+    if (!rate) {
+      console.error(`[ERROR] Commission rate not found for butcher='${butcherId}', category='${category}'. Using default 7% may cause incorrect revenue calculation. Please configure the rate in rates.ts or Google Sheets.`);
+      return 0.07; // Default to 7% if not found
+    }
+
+    return rate.rate;
 };
 
 // Get markup rate for a specific butcher and category
