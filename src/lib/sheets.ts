@@ -2363,6 +2363,19 @@ const calculateRevenueFromPreparingWeights = async (
       const purchasePrice = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
       const commissionRate = getCommissionRate(butcherId, item.category || 'default');
       
+      // Debug logging for revenue calculation
+      console.log(`[calculateRevenueFromPreparingWeights] Revenue calculation for ${itemName}:`, {
+        butcherId,
+        itemName,
+        itemSize,
+        category: item.category || 'default',
+        purchasePrice,
+        commissionRate: `${(commissionRate * 100).toFixed(1)}%`,
+        weight,
+        calculation: `(${purchasePrice} × ${weight}) - (${(commissionRate * 100).toFixed(1)}% × ${purchasePrice} × ${weight})`,
+        itemRevenue: (purchasePrice * weight) - (commissionRate * purchasePrice * weight)
+      });
+      
       // Calculate item revenue: (Purchase Price × Weight) - Commission% of (Purchase Price × Weight)
       const itemRevenue = (purchasePrice * weight) - (commissionRate * purchasePrice * weight);
       
@@ -2764,9 +2777,9 @@ export const getPurchasePriceFromMenu = async (
     const priceColumn = isMeat ? 2 : 3; // Column C for meat, Column D for fish
     
     // Read appropriate range based on butcher type
-    // Meat: A:C (Item Name, Category, Purchase Price)
-    // Fish: A:D (Item Name, Category, Size, Purchase Price)
-    const range = `${tabName}!A:${isMeat ? 'C' : 'D'}`;
+    // Meat: A:G (Item Name, Category, Purchase Price, Selling Price, Unit, nos weight, Date) - read full range to ensure correct column mapping
+    // Fish: A:H (Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight, Date) - read full range to ensure correct column mapping
+    const range = `${tabName}!A:${isMeat ? 'G' : 'H'}`;
     
     // Fetch data
     const response = await sheets.spreadsheets.values.get({
@@ -2804,6 +2817,15 @@ export const getPurchasePriceFromMenu = async (
           // Ensure we have the price column
           if (row.length > priceColumn) {
             const price = parseFloat(row[priceColumn]) || 0;
+            // Debug: Log the row data to verify column mapping
+            console.log(`[getPurchasePriceFromMenu] Found match for "${itemName}" in ${butcherId}:`, {
+              itemName: row[0],
+              category: row[1],
+              purchasePrice: row[2],
+              sellingPrice: row[3],
+              priceColumn,
+              parsedPrice: price
+            });
             if (price > 0) {
               return price;
             }

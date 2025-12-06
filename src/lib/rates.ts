@@ -27,6 +27,15 @@ export const DEFAULT_COMMISSION_RATES: CommissionRate[] = [
   { butcherId: 'alif', category: 'seawater fish', rate: 0.10 },
   { butcherId: 'alif', category: 'freshwater fish', rate: 0.10 },
   { butcherId: 'alif', category: 'meat item', rate: 0.10 },
+  
+  // Test Meat Butcher - 10% for chicken (same as usaj)
+  { butcherId: 'test_meat', category: 'chicken', rate: 0.10 },
+  { butcherId: 'test_meat', category: 'beef', rate: 0.10 },
+  
+  // Test Fish Butcher - 7% for all items (same as kak/ka_sons)
+  { butcherId: 'test_fish', category: 'seawater fish', rate: 0.07 },
+  { butcherId: 'test_fish', category: 'freshwater fish', rate: 0.07 },
+  { butcherId: 'test_fish', category: 'meat item', rate: 0.07 },
 ];
 
 // Default markup rates by butcher and category
@@ -52,6 +61,13 @@ export const DEFAULT_MARKUP_RATES: MarkupRate[] = [
   { butcherId: 'alif', category: 'seawater fish', rate: 0.05 },
   { butcherId: 'alif', category: 'freshwater fish', rate: 0.05 },
   { butcherId: 'alif', category: 'meat item', rate: 0.05 },
+  
+  { butcherId: 'test_meat', category: 'chicken', rate: 0.05 },
+  { butcherId: 'test_meat', category: 'beef', rate: 0.00 },
+  
+  { butcherId: 'test_fish', category: 'seawater fish', rate: 0.05 },
+  { butcherId: 'test_fish', category: 'freshwater fish', rate: 0.05 },
+  { butcherId: 'test_fish', category: 'meat item', rate: 0.05 },
 ];
 
 // Get all butcher rates with default values
