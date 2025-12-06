@@ -349,7 +349,7 @@ export default function AnalyticsPage() {
     // Priority 4: Fall back to sum of item quantities
     return order.items.reduce((sum, item) => sum + item.quantity, 0);
   };
-
+  
   // Calculate total revenue including declined orders (negative revenue)
   const completedRevenue = completedOrders.reduce((acc, order) => acc + calculateOrderRevenueAnalytics(order), 0);
   const declinedRevenue = declinedOrders.reduce((acc, order) => {
@@ -679,11 +679,11 @@ export default function AnalyticsPage() {
                       </TableCell>
                     </TableRow>
                   )) : (
-                    <TableRow>
-                      <TableCell colSpan={4} className="h-24 text-center">
-                        No orders today.
-                      </TableCell>
-                    </TableRow>
+                     <TableRow>
+                       <TableCell colSpan={4} className="h-24 text-center">
+                         No orders today.
+                       </TableCell>
+                     </TableRow>
                   )}
                 </TableBody>
               </Table>

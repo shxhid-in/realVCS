@@ -31,6 +31,7 @@ export const DEFAULT_COMMISSION_RATES: CommissionRate[] = [
   // Test Meat Butcher - 10% for chicken (same as usaj)
   { butcherId: 'test_meat', category: 'chicken', rate: 0.10 },
   { butcherId: 'test_meat', category: 'beef', rate: 0.10 },
+  { butcherId: 'test_meat', category: 'mutton', rate: 0.10 },
   
   // Test Fish Butcher - 7% for all items (same as kak/ka_sons)
   { butcherId: 'test_fish', category: 'seawater fish', rate: 0.07 },
@@ -64,7 +65,8 @@ export const DEFAULT_MARKUP_RATES: MarkupRate[] = [
   
   { butcherId: 'test_meat', category: 'chicken', rate: 0.05 },
   { butcherId: 'test_meat', category: 'beef', rate: 0.00 },
-  
+  { butcherId: 'test_meat', category: 'mutton', rate: 0.00 }, // 0% markup for mutton
+
   { butcherId: 'test_fish', category: 'seawater fish', rate: 0.05 },
   { butcherId: 'test_fish', category: 'freshwater fish', rate: 0.05 },
   { butcherId: 'test_fish', category: 'meat item', rate: 0.05 },
@@ -90,7 +92,7 @@ export const getDefaultButcherRates = (): ButcherRates[] => {
 
 // Get commission rate for a specific butcher and category
 export const getCommissionRate = (butcherId: string, category: string, customRates?: CommissionRate[]): number => {
-  const rates = customRates || DEFAULT_COMMISSION_RATES;
+  const rates = DEFAULT_COMMISSION_RATES;
   const categoryLower = category.toLowerCase();
   
   // Try exact match first (case-insensitive)
