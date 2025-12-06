@@ -4,8 +4,7 @@ import { getButcherNameFromId } from '@/lib/butcherMapping';
 import { getOrderFromCache, updateOrderInCache, removeOrderFromCache } from '@/lib/orderCache';
 import { centralAPIClient } from '@/lib/centralAPIClient';
 import { queueResponse, removeQueuedResponse } from '@/lib/orderQueue';
-import { saveOrderToSheetAfterAccept, getPurchasePriceFromMenu } from '@/lib/sheets';
-import { getCommissionRate } from '@/lib/rates';
+import { saveOrderToSheetAfterAccept } from '@/lib/sheets';
 import type { Order, OrderItem } from '@/lib/types';
 
 /**
