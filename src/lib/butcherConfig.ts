@@ -591,6 +591,33 @@ export function getButcherCategories(butcherId: string): string[] {
   });
 }
 
+// ============================================================================
+// RATE UTILITY FUNCTIONS (for CommissionMarkupSettings component)
+// ============================================================================
+
+/**
+ * Validate rate values (must be between 0% and 100%)
+ */
+export function validateRate(rate: number): boolean {
+  return rate >= 0 && rate <= 1; // Between 0% and 100%
+}
+
+/**
+ * Format rate for display (e.g., 0.07 -> "7.0%")
+ */
+export function formatRate(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+/**
+ * Parse rate from input string (e.g., "7" -> 0.07)
+ */
+export function parseRate(input: string): number {
+  const value = parseFloat(input);
+  if (isNaN(value)) return 0;
+  return value / 100; // Convert percentage to decimal
+}
+
 /**
  * Get fish item full name (for backward compatibility with existing code)
  * Mapping: English name -> Full three-language name

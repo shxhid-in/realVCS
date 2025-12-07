@@ -12,13 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
 import { useToast } from "../../hooks/use-toast"
 import { 
   getDefaultButcherRates,
-  getButcherCategories
-} from "../../lib/butcherConfig"
-import {
-  validateRate, 
-  formatRate, 
+  getButcherCategories,
+  validateRate,
+  formatRate,
   parseRate
-} from "../../lib/rates"
+} from "../../lib/butcherConfig"
 import type { ButcherRates, CommissionRate, MarkupRate } from "../../lib/types"
 import { freshButchers } from "../../lib/butcherConfig"
 import { Save, RefreshCw, DollarSign, Percent } from "lucide-react"
