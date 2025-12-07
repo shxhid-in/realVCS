@@ -112,16 +112,6 @@ export const freshButchers: Butcher[] = [
         createUnavailableItem('c1i8', 'chicken nadan', 'kg', defaultSize()),
         createUnavailableItem('c1i9', 'chicken thigh', 'kg', defaultSize()),
       ]},
-      { id: 'c2', name: 'Mutton', items: [
-        createUnavailableItem('c2i1', 'mutton meat', 'kg', defaultSize()),
-        createUnavailableItem('c2i2', 'mutton rib', 'kg', defaultSize()),
-        createUnavailableItem('c2i3', 'mutton boneless', 'kg', defaultSize()),
-        createUnavailableItem('c2i4', 'mutton liver', 'kg', defaultSize()),
-        createUnavailableItem('c2i5', 'mutton brain', 'nos', defaultSize()),
-        createUnavailableItem('c2i6', 'mutton head', 'kg', defaultSize()),
-        createUnavailableItem('c2i7', 'mutton botty', 'kg', defaultSize()),
-        createUnavailableItem('c2i8', 'mutton paaya', 'kg', defaultSize()),
-      ]},
       { id: 'c3', name: 'Beef', items: [
         createUnavailableItem('c3i1', 'beef meat', 'kg', defaultSize()),
         createUnavailableItem('c3i2', 'beef liver', 'kg', defaultSize()),
@@ -172,24 +162,6 @@ export const freshButchers: Butcher[] = [
     ]
   },
   {
-    id: 'kak',
-    name: 'KAK',
-    password: 'password',
-    menu: createFishMenu()
-  },
-  {
-    id: 'ka_sons',
-    name: 'KA Sons',
-    password: 'password',
-    menu: createFishMenu()
-  },
-  {
-    id: 'alif',
-    name: 'Alif',
-    password: 'password',
-    menu: createFishMenu()
-  },
-  {
     id: 'test_meat',
     name: 'Test Meat Butcher',
     password: 'test',
@@ -210,6 +182,24 @@ export const freshButchers: Butcher[] = [
         createUnavailableItem('c2i3', 'mutton boneless', 'kg', defaultSize()),
       ]}
     ]
+  },
+  {
+    id: 'kak',
+    name: 'KAK',
+    password: 'password',
+    menu: createFishMenu()
+  },
+  {
+    id: 'ka_sons',
+    name: 'KA Sons',
+    password: 'password',
+    menu: createFishMenu()
+  },
+  {
+    id: 'alif',
+    name: 'Alif',
+    password: 'password',
+    menu: createFishMenu()
   },
   {
     id: 'test_fish',
@@ -249,16 +239,16 @@ const FISH_NAME_MAPPING: Record<string, string> = {
   'White Tuna': 'Vella Choora - White Tuna - വെള്ള ചൂര',
   'Kazhanthan Prawns': 'Kazhanthan Chemmeen - Kazhanthan Prawns - കഴന്തൻ ചെമ്മീൻ',
   'Crab': 'Nandu - Crab - നണ്ട്',
-  'Eari': 'Eari - Emperor - ഏരി',
+  'emperor': 'Eari - Emperor - ഏരി',
   'Clam': 'Kakka - Clam - കക്ക',
   'Sea Bass': 'Kalanji - Sea Bass - കാളാഞ്ചി',
   'Milk Fish': 'Poomeen - Milk Fish - പൂമീൻ',
   'King Fish': 'Aykora - King Fish - അയ്‌കോറ',
-  'Ayalakanni': 'Ayalakanni - Indian Mackerel - അയലകണ്ണി',
+  'Indian Mackerel': 'Ayalakanni - Indian Mackerel - അയലകണ്ണി',
   'Silver Mullet': 'Kanambu - Silver Mullet - കണമ്പ്',
   'Cat Fish': 'Etta - Cat Fish - ഏട്ട',
   'White Sardine': 'Veloori - White Sardine - വേളൂരി',
-  'Velladavu': 'Velladavu - Silver Belly - വെള്ളടവ്',
+  'Silver Belly': 'Velladavu - Silver Belly - വെള്ളടവ്',
   'Baraccuda': 'Sheelavu - Baraccuda - ഷീലാവ്',
   'Gar Fish': 'Kolaan - Gar Fish - കോലാൻ',
   'Kozhuva': 'Kozhuva - Anchovy - കൊഴുവ',
