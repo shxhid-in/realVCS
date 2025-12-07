@@ -1,6 +1,6 @@
 import { getSheetSheetsClient, getPurchasePriceFromMenu } from './sheets';
 import { calculateItemRevenue } from './revenueService';
-import { getCommissionRate } from './rates';
+import { getCommissionRate, getButcherType, isFishButcher } from './butcherConfig';
 
 // IST Helper Functions (matching Butcher POS format)
 const getISTDate = (): string => {
@@ -162,13 +162,13 @@ export const saveSalesDataToSheet = async (
   const revenueParts: string[] = []; // Format: item: revenue
   let totalSalesRevenue = 0;
 
-  // Helper functions for butcher type detection
-  const isFishButcher = (butcherId: string) => ['kak', 'ka_sons', 'alif', 'test_fish'].includes(butcherId);
-  const isMeatButcher = (butcherId: string) => ['usaj', 'usaj_mutton', 'pkd', 'test_meat'].includes(butcherId);
+  // Helper functions for butcher type detection (use getButcherType)
+  const fishButcher = getButcherType(butcherId) === 'fish';
+  const meatButcher = getButcherType(butcherId) === 'meat';
 
   for (const item of orderData.items) {
     const itemName = item.name;
-    const fishButcher = isFishButcher(butcherId);
+    // Use fishButcher from above
     const rejected = (item as any).rejected;
 
     // Preparing Weight: Format as item: weight or item: rejected (no curly braces)

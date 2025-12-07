@@ -577,6 +577,21 @@ export function isMixedButcher(butcherId: string): boolean {
 }
 
 /**
+ * Get category names for a butcher (for backward compatibility with rates.ts)
+ * Returns category names as strings (e.g., 'Chicken', 'Mutton', 'Sea Water Fish')
+ */
+export function getButcherCategories(butcherId: string): string[] {
+  const config = getButcherConfig(butcherId);
+  if (!config) return [];
+  
+  // Return category names from the config
+  return config.categories.map(categoryId => {
+    const category = CATEGORIES[categoryId as keyof typeof CATEGORIES];
+    return category ? category.name : categoryId;
+  });
+}
+
+/**
  * Get fish item full name (for backward compatibility with existing code)
  * Mapping: English name -> Full three-language name
  */

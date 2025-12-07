@@ -5,35 +5,7 @@
 
 import type { Order, OrderItem } from './types';
 import { saveOrderToSheet } from './sheets';
-
-// Define butcher specializations
-const BUTCHER_SPECIALIZATIONS = {
-  'usaj': {
-    name: 'Usaj Meat Hub',
-    specializes: ['chicken', 'mutton', 'beef'],
-    type: 'meat'
-  },
-  'pkd': {
-    name: 'PKD Stall',
-    specializes: ['chicken', 'mutton'],
-    type: 'meat'
-  },
-  'alif': {
-    name: 'Alif',
-    specializes: ['fish', 'seafood', 'prawns', 'crab'],
-    type: 'fish'
-  },
-  'kak': {
-    name: 'KAK',
-    specializes: ['fish', 'seafood', 'prawns', 'crab'],
-    type: 'fish'
-  },
-  'ka_sons': {
-    name: 'KA Sons',
-    specializes: ['fish', 'seafood', 'prawns', 'crab'],
-    type: 'fish'
-  }
-} as const;
+import { getButcherConfig, getButcherType, freshButchers, CATEGORIES } from './butcherConfig';
 
 // Item categorization for smart assignment
 const ITEM_CATEGORIES = {
@@ -74,29 +46,49 @@ export const assignOrderToButcher = (order: Order): string[] => {
     }
   });
   
-  // Find butchers who can handle these item types
-  for (const [butcherId, butcher] of Object.entries(BUTCHER_SPECIALIZATIONS)) {
-    const canHandle = Array.from(itemTypes).every(itemType => 
-      butcher.specializes.some(specialization => 
-        specialization === itemType || 
-        (itemType === 'fish' && specialization === 'seafood') ||
-        (itemType === 'seafood' && specialization === 'fish')
-      )
-    );
+  // Find butchers who can handle these item types using butcher config
+  for (const butcher of freshButchers) {
+    const config = getButcherConfig(butcher.id);
+    if (!config) continue;
+    
+    // Get categories for this butcher
+    const butcherCategories = config.categories.map(catId => {
+      const category = CATEGORIES[catId as keyof typeof CATEGORIES];
+      return category ? category.name.toLowerCase() : catId;
+    });
+    
+    // Check if butcher can handle all item types
+    const canHandle = Array.from(itemTypes).every(itemType => {
+      // Map item types to category names
+      const categoryMap: Record<string, string[]> = {
+        'chicken': ['chicken'],
+        'mutton': ['mutton'],
+        'beef': ['beef'],
+        'fish': ['sea water fish', 'fresh water fish', 'steak fish'],
+        'seafood': ['sea water fish', 'fresh water fish']
+      };
+      
+      const matchingCategories = categoryMap[itemType] || [];
+      return matchingCategories.some(cat => 
+        butcherCategories.some(butcherCat => butcherCat.includes(cat))
+      );
+    });
     
     if (canHandle) {
-      possibleButchers.push(butcherId);
+      possibleButchers.push(butcher.id);
     }
   }
   
   // If no specific match, assign based on item type priority
   if (possibleButchers.length === 0) {
     if (itemTypes.has('chicken') || itemTypes.has('mutton') || itemTypes.has('beef')) {
-      // Meat products - prefer Usaj (has beef) over PKD
-      possibleButchers.push('usaj');
+      // Meat products - find first meat butcher
+      const meatButcher = freshButchers.find(b => getButcherType(b.id) === 'meat');
+      if (meatButcher) possibleButchers.push(meatButcher.id);
     } else if (itemTypes.has('fish') || itemTypes.has('seafood')) {
-      // Fish items - assign to any fish butcher
-      possibleButchers.push('alif', 'kak', 'ka_sons');
+      // Fish items - find first fish butcher
+      const fishButcher = freshButchers.find(b => getButcherType(b.id) === 'fish');
+      if (fishButcher) possibleButchers.push(fishButcher.id);
     }
   }
   
@@ -137,22 +129,25 @@ export const getRecommendedButcher = (order: Order): { butcherId: string; butche
   
   if (possibleButchers.length === 1) {
     const butcherId = possibleButchers[0];
+    const butcher = freshButchers.find(b => b.id === butcherId);
     return {
       butcherId,
-      butcherName: BUTCHER_SPECIALIZATIONS[butcherId as keyof typeof BUTCHER_SPECIALIZATIONS].name,
+      butcherName: butcher?.name || butcherId,
       confidence: 'high'
     };
   } else if (possibleButchers.length > 1) {
     const butcherId = possibleButchers[0];
+    const butcher = freshButchers.find(b => b.id === butcherId);
     return {
       butcherId,
-      butcherName: BUTCHER_SPECIALIZATIONS[butcherId as keyof typeof BUTCHER_SPECIALIZATIONS].name,
+      butcherName: butcher?.name || butcherId,
       confidence: 'medium'
     };
   } else {
+    const defaultButcher = freshButchers.find(b => b.id === 'usaj') || freshButchers[0];
     return {
-      butcherId: 'usaj',
-      butcherName: 'Usaj Meat Hub',
+      butcherId: defaultButcher?.id || 'usaj',
+      butcherName: defaultButcher?.name || 'Usaj Meat Hub',
       confidence: 'low'
     };
   }

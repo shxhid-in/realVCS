@@ -4,8 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getFishItemFullName, freshButchers } from '../../lib/butcherConfig';
-import { getCommissionRate } from '../../lib/rates';
+import { getFishItemFullName, freshButchers, getButcherType, isFishButcher, getCommissionRate } from '../../lib/butcherConfig';
 import { getRatesFromSheet } from '../../lib/sheets';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,14 +22,9 @@ import { Order, OrderItem } from '@/lib/types';
 import { useOrderCache } from '@/hooks/useOrderCache';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// Helper function to determine if a butcher is a meat butcher
+// Helper function to determine if a butcher is a meat butcher (uses getButcherType)
 function isMeatButcher(butcherId: string): boolean {
-    return ['usaj', 'usaj_mutton', 'pkd', 'test_meat'].includes(butcherId);
-}
-
-// Helper function to determine if a butcher is a fish butcher (local version to avoid import conflict)
-function isFishButcherLocal(butcherId: string): boolean {
-    return ['kak', 'ka_sons', 'alif', 'test_fish'].includes(butcherId);
+    return getButcherType(butcherId) === 'meat';
 }
 
 // Helper function to determine if a chicken item needs weight dialog
@@ -69,7 +63,7 @@ function getDisplayOrderId(orderId: string): string {
 // Helper function to get item display name
 function getItemDisplayName(itemName: string, butcherId: string): string {
     // For fish butchers, show full three-language name (manglish - english - malayalam)
-    if (isFishButcherLocal(butcherId)) {
+    if (isFishButcher(butcherId)) {
         // If already has three-language format, return as is
         if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
             return itemName;
