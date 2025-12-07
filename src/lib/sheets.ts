@@ -1781,15 +1781,29 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
         }
 
         const sheets = await getButcherSheetsClient(butcherId);
-        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
+        const butcherType = getButcherType(butcherId);
         
-        if (!tabName) {
-            throw new Error(`No tab found for butcher: ${butcherId}`);
+        // For mixed butchers, determine tab from first category
+        // For meat/fish butchers, use BUTCHER_TABS
+        let tabName: string | null = null;
+        if (butcherType === 'mixed') {
+            if (menu.length > 0) {
+                const firstCategory = menu[0];
+                tabName = getPriceSheetTab(butcherId, firstCategory.name);
+            }
+            if (!tabName) {
+                throw new Error(`No tab found for mixed butcher: ${butcherId}`);
+            }
+        } else {
+            tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS] || null;
+            if (!tabName) {
+                throw new Error(`No tab found for butcher: ${butcherId}`);
+            }
         }
 
         // Determine butcher type
-        const isMeatButcher = getButcherType(butcherId) === 'meat';
-        const isFishButcher = getButcherType(butcherId) === 'fish';
+        const isMeatButcher = butcherType === 'meat' || (butcherType === 'mixed' && menu.length > 0 && getItemTypeFromCategory(menu[0].name) === 'meat');
+        const isFishButcher = butcherType === 'fish' || (butcherType === 'mixed' && menu.length > 0 && getItemTypeFromCategory(menu[0].name) === 'fish');
         
         // Clear existing data
         const clearRange = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
@@ -1901,21 +1915,34 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
 /**
  * Get menu items from the Menu POS sheet for a specific butcher
  */
-export const getMenuFromSheet = async (butcherId: string): Promise<MenuCategory[]> => {
+export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: string | null): Promise<MenuCategory[]> => {
     try {
         if (!MENU_POS_SHEET_ID) {
             throw new Error("GOOGLE_SHEET_ID_MENU_POS not configured");
         }
 
         const sheets = await getButcherSheetsClient(butcherId);
-        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
+        
+        // Use override tab name if provided (for mixed butchers), otherwise use BUTCHER_TABS
+        let tabName: string | null = null;
+        if (tabNameOverride) {
+            tabName = tabNameOverride;
+        } else {
+            const butcherType = getButcherType(butcherId);
+            if (butcherType === 'mixed') {
+                // For mixed butchers without override, we can't determine which tab to use
+                throw new Error(`Tab name required for mixed butcher: ${butcherId}`);
+            }
+            tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS] || null;
+        }
         
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
 
         // Determine butcher type
-        const isMeatButcher = getButcherType(butcherId) === 'meat';
+        const butcherType = getButcherType(butcherId);
+        const isMeatButcher = butcherType === 'meat' || (butcherType === 'mixed' && tabName && getButcherConfig(butcherId)?.meatSheetTab === tabName);
         
         // Read data from sheet
         const range = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
@@ -2028,7 +2055,13 @@ const extractEnglishName = (fullName: string): string => {
  */
 export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCategory[]): Promise<MenuCategory[]> => {
     try {
-        const sheetMenu = await getMenuFromSheet(butcherId);
+        // For mixed butchers, determine which tab to load from based on first category
+        const butcherType = getButcherType(butcherId);
+        let tabName: string | null = null;
+        if (butcherType === 'mixed' && fullMenu.length > 0) {
+            tabName = getPriceSheetTab(butcherId, fullMenu[0].name);
+        }
+        const sheetMenu = await getMenuFromSheet(butcherId, tabName);
         
         // Create a simple lookup map
         const sheetDataMap: { [key: string]: { [size: string]: { price: number, minWeight?: number, maxWeight?: number } } } = {};
