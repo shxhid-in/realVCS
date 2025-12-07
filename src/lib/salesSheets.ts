@@ -1,5 +1,3 @@
-import { google } from 'googleapis';
-import { JWT } from 'google-auth-library';
 import { getSheetSheetsClient, getPurchasePriceFromMenu } from './sheets';
 import { calculateItemRevenue } from './revenueService';
 import { getCommissionRate } from './rates';
@@ -93,47 +91,6 @@ export interface SalesData {
   margin: number;
 }
 
-// Initialize Google Sheets API
-export const getSheetsClient = async () => {
-  const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-  const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
-  
-  if (!clientEmail || !privateKey) {
-    console.error('Missing Google credentials in salesSheets:', {
-      hasClientEmail: !!clientEmail,
-      hasPrivateKey: !!privateKey,
-      clientEmail: clientEmail ? 'Set' : 'Missing',
-      privateKeyLength: privateKey ? privateKey.length : 0
-    });
-    throw new Error("Missing Google credentials in environment variables. Please check GOOGLE_SHEETS_CLIENT_EMAIL and GOOGLE_SHEETS_PRIVATE_KEY.");
-  }
-  
-  // Clean up the private key format - handle different formats
-  let cleanPrivateKey = privateKey
-    .replace(/\\n/g, '\n')
-    .replace(/"/g, '')
-    .trim();
-  
-  // Ensure proper formatting
-  if (!cleanPrivateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-    cleanPrivateKey = `-----BEGIN PRIVATE KEY-----\n${cleanPrivateKey}\n-----END PRIVATE KEY-----`;
-  }
-
-  try {
-  const auth = new JWT({
-      email: clientEmail.replace(/"/g, ''),
-      key: cleanPrivateKey,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-
-  const sheets = google.sheets({ version: 'v4', auth });
-  return sheets;
-  } catch (error) {
-    console.error('Error creating Google Sheets client in salesSheets:', error);
-    throw new Error(`Failed to authenticate with Google Sheets: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-};
-
 // Get the Sales VCS spreadsheet ID from environment
 const getSalesSpreadsheetId = () => {
   return process.env.SALES_VCS_SPREADSHEET_ID;
@@ -163,27 +120,9 @@ export const calculateSalesRevenue = (
   return preparingWeight * sellingPrice;
 };
 
-// Get butcher name for Menu POS sheet (same as Sales VCS sheet)
-const getMenuButcherName = (butcherId: string): string => {
-  const butcherNames: { [key: string]: string } = {
-    'usaj': 'Usaj_Meat_Hub',
-    'usaj_mutton': 'Usaj_Mutton_Shop',
-    'pkd': 'PKD_Stall',
-    'kak': 'KAK',
-    'ka_sons': 'KA_Sons',
-    'alif': 'Alif',
-    'test_fish': 'Test_Fish_Butcher',
-    'test_meat': 'Test_Meat_Butcher'
-  };
-  const mappedName = butcherNames[butcherId] || butcherId;
-  return mappedName;
-};
-
-// Save sales data to Sales VCS sheet
-// REMOVED: saveSalesDataToSheet - complex duplicate function
-// Use saveSalesDataToSheetSimple instead for cleaner implementation
-
 // Main function for saving sales data to Sales VCS sheet
+// This function saves order data to the Sales VCS sheet when an order is marked as prepared/completed.
+// It uses cached order data (with revenue and preparing weights) from when the order was accepted.
 export const saveSalesDataToSheet = async (
   orderId: string,
   butcherId: string,
@@ -356,7 +295,7 @@ export const getSalesDataFromSheet = async (
   year: number
 ): Promise<SalesData[]> => {
   try {
-    const sheets = await getSheetsClient();
+    const sheets = await getSheetSheetsClient('sales');
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
@@ -489,7 +428,7 @@ export const saveDAMTargetToSheet = async (
   totalTarget: number
 ): Promise<void> => {
   try {
-    const sheets = await getSheetsClient();
+    const sheets = await getSheetSheetsClient('sales');
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
@@ -647,7 +586,7 @@ export const saveDAMAnalysisData = async (
   }
 ): Promise<void> => {
   try {
-    const sheets = await getSheetsClient();
+    const sheets = await getSheetSheetsClient('sales');
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
@@ -687,7 +626,7 @@ export const getDAMAnalysisData = async (
   year: number
 ): Promise<any | null> => {
   try {
-    const sheets = await getSheetsClient();
+    const sheets = await getSheetSheetsClient('sales');
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
@@ -728,7 +667,7 @@ export const getDAMTargetFromSheet = async (
   year: number
 ): Promise<MonthlyTarget | null> => {
   try {
-    const sheets = await getSheetsClient();
+    const sheets = await getSheetSheetsClient('sales');
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
@@ -926,7 +865,7 @@ const updateWeeklyTargetsInSheet = async (
   weeklyTargets: WeeklyTarget[]
 ) => {
   try {
-    const sheets = await getSheetsClient();
+    const sheets = await getSheetSheetsClient('sales');
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
@@ -995,8 +934,8 @@ const updateWeeklyTargetsInSheet = async (
 // Get butcher revenue from main butcher POS sheet
 export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId: string): Promise<number> => {
   try {
-    // Use the main butcher POS sheet client, not the sales VCS sheet client
-    const mainSheets = await getMainSheetsClient();
+    // Use the butcher POS sheet client to read from ButcherPOS sheet
+    const mainSheets = await getSheetSheetsClient('pos');
     const spreadsheetId = process.env.BUTCHER_POS_SHEET_ID;
     
     if (!spreadsheetId) {
@@ -1063,46 +1002,3 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
     return 0;
   }
 };
-
-// Get main butcher POS sheet client (separate from sales VCS sheet client)
-export const getMainSheetsClient = async () => {
-  const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-  const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
-  
-  if (!clientEmail || !privateKey) {
-    console.error('Missing Google credentials for main sheet:', {
-      hasClientEmail: !!clientEmail,
-      hasPrivateKey: !!privateKey,
-      clientEmail: clientEmail ? 'Set' : 'Missing',
-      privateKeyLength: privateKey ? privateKey.length : 0
-    });
-    throw new Error("Missing Google credentials in environment variables. Please check GOOGLE_SHEETS_CLIENT_EMAIL and GOOGLE_SHEETS_PRIVATE_KEY.");
-  }
-  
-  // Clean up the private key format - handle different formats
-  let cleanPrivateKey = privateKey
-    .replace(/\\n/g, '\n')
-    .replace(/"/g, '')
-    .trim();
-  
-  // Ensure proper formatting
-  if (!cleanPrivateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-    cleanPrivateKey = `-----BEGIN PRIVATE KEY-----\n${cleanPrivateKey}\n-----END PRIVATE KEY-----`;
-  }
-
-  try {
-    const auth = new JWT({
-      email: clientEmail.replace(/"/g, ''),
-      key: cleanPrivateKey,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-
-    const sheets = google.sheets({ version: 'v4', auth });
-    return sheets;
-  } catch (error) {
-    console.error('Error creating main Google Sheets client:', error);
-    throw new Error(`Failed to authenticate with Google Sheets: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-};
-
-// Commission rate function is now imported from rates.ts

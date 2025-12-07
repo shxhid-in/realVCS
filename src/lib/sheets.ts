@@ -1272,8 +1272,6 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
  */
 export const saveOrderToSheet = async (order: Order, butcherId: string) => {
     try {
-        // Order saved - polling will pick up changes
-        
         if (!BUTCHER_POS_SHEET_ID) {
             throw new Error("BUTCHER_POS_SHEET_ID or GOOGLE_SPREADSHEET_ID not configured");
         }
@@ -1304,7 +1302,6 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
         // Different column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
         // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns)
-        const range = isMeat ? `${tabName}!A2:F` : `${tabName}!A2:G`;
         const rowData = [
             orderDate, // Order Date (use actual order date)
             orderNo,
