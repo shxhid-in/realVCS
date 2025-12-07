@@ -18,7 +18,7 @@ import {
   parseRate
 } from "../../lib/rates"
 import type { ButcherRates, CommissionRate, MarkupRate } from "../../lib/types"
-import { freshButchers } from "../../lib/freshMockData"
+import { freshButchers } from "../../lib/butcherConfig"
 import { Save, RefreshCw, DollarSign, Percent } from "lucide-react"
 
 export function CommissionMarkupSettings() {

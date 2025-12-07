@@ -24,7 +24,7 @@ import {
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns"
 import type { Order } from "../../lib/types"
 import { getItemPurchasePricesFromSheet } from "../../lib/sheets"
-import { freshButchers } from "../../lib/freshMockData"
+import { freshButchers } from "../../lib/butcherConfig"
 
 interface OrdersAnalyticsProps {
   className?: string

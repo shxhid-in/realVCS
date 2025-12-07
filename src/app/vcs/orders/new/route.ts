@@ -4,7 +4,7 @@ import { getButcherIdFromName } from '@/lib/butcherMapping';
 import { cacheOrder } from '@/lib/orderCache';
 import { queueOrder as queueOrderToQueue } from '@/lib/orderQueue';
 import { sendOrderUpdate } from '@/lib/sseConnectionManager';
-import { getFishItemFullName, isFishButcher } from '@/lib/freshMockData';
+import { getFishItemFullName, isFishButcher } from '@/lib/butcherConfig';
 import type { Order, OrderItem } from '@/lib/types';
 
 /**

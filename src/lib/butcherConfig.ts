@@ -3,7 +3,7 @@
  * Centralized configuration for all butchers including categories, commission rates, and sheet tabs
  */
 
-import type { MenuCategory, MenuItem } from './types';
+import type { MenuCategory, MenuItem, Butcher } from './types';
 
 // Helper to create a default size for items
 const defaultSize = (price: number = 0) => [{ id: `s-${Math.random()}`, size: 'default' as const, price }];
@@ -665,3 +665,40 @@ export function getFishItemFullName(englishName: string): string {
   // If no match found, return original name
   return englishName;
 }
+
+// ============================================================================
+// FRESH BUTCHERS ARRAY
+// ============================================================================
+
+/**
+ * Generate butchers array from butcher config
+ * Creates Butcher[] objects with menu data from config
+ */
+export const freshButchers: Butcher[] = (() => {
+  const butcherIds = [
+    'usaj',
+    'usaj_mutton',
+    'pkd',
+    'kak',
+    'ka_sons',
+    'alif',
+    'test_meat',
+    'test_fish'
+  ];
+
+  return butcherIds.map(butcherId => {
+    const config = getButcherConfig(butcherId);
+    const password = getButcherPassword(butcherId);
+    
+    if (!config) {
+      throw new Error(`Butcher config not found for: ${butcherId}`);
+    }
+
+    return {
+      id: config.id as Butcher['id'],
+      name: config.name,
+      password: password || 'password', // Fallback to 'password' if not found
+      menu: getButcherMenuCategories(butcherId)
+    };
+  });
+})();

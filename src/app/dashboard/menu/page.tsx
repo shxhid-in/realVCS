@@ -2,7 +2,7 @@
 "use client"
 
 import { useAuth } from "../../../context/AuthContext"
-import { getFishItemFullName, isFishButcher, freshButchers } from "../../../lib/freshMockData"
+import { getFishItemFullName, isFishButcher, freshButchers } from "../../../lib/butcherConfig"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card"
 import { Label } from "../../../components/ui/label"
 import { Input } from "../../../components/ui/input"
@@ -145,7 +145,7 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
   
   const TabsValue = (item.sizes && item.sizes.length > 0) ? item.sizes[0].id : "new";
   
-  const isMeatCategory = categoryName.toLowerCase() === 'meat items';
+  const isMeatCategory = categoryName.toLowerCase() === 'steak fish';
   
   // For fish butchers, always show all three sizes (small, medium, big)
   // For meat items, use only default size
@@ -262,7 +262,7 @@ export default function MenuManagementPage() {
   useEffect(() => {
     if (butcher) {
       // Import the latest butchers data dynamically to ensure we get the updated data
-      import('../../../lib/freshMockData').then(({ freshButchers: butchers }) => {
+      import('../../../lib/butcherConfig').then(({ freshButchers: butchers }) => {
         const latestButcherData = butchers.find(b => b.id === butcher.id);
         if (latestButcherData) {
           setMenu(latestButcherData.menu);
@@ -433,7 +433,7 @@ export default function MenuManagementPage() {
     setIsLoading(true);
     try {
       // Load fresh mock data
-      const { freshButchers: butchers } = await import('../../../lib/freshMockData');
+      const { freshButchers: butchers } = await import('../../../lib/butcherConfig');
       const latestButcherData = butchers.find(b => b.id === butcher.id);
       
       if (latestButcherData) {

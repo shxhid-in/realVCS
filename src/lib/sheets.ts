@@ -2,7 +2,7 @@
 
 import { google } from 'googleapis';
 import type { Order, OrderItem, MenuCategory, Butcher, MenuItem, CommissionRate, MarkupRate, ButcherRates } from './types';
-import { freshButchers as butchers, getFishItemFullName } from './freshMockData';
+import { freshButchers as butchers, getFishItemFullName } from './butcherConfig';
 import { getDefaultButcherRates, getCommissionRate, getMarkupRate } from './rates';
 import { measureApiCall } from './apiMonitor';
 import {normalizeItemName} from './matchingUtils';

@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Butcher } from '../lib/types';
-import { freshButchers as butchers } from '../lib/freshMockData';
+import { freshButchers as butchers } from '../lib/butcherConfig';
 import { decodeUserToken, isTokenExpired } from '../lib/auth/jwtClient';
 
 // ✅ FIX: Helper to refresh token via API (client-side can't generate tokens)
@@ -246,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshButcherData = () => {
     if (butcher) {
       // Force re-import of mock data to get latest changes
-      import('../lib/freshMockData').then(({ freshButchers: latestButchers }) => {
+      import('../lib/butcherConfig').then(({ freshButchers: latestButchers }) => {
         const latestButcherData = latestButchers.find(b => b.id === butcher.id);
         if (latestButcherData) {
           setButcher(latestButcherData);

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getFishItemFullName, freshButchers } from '../../lib/freshMockData';
+import { getFishItemFullName, freshButchers } from '../../lib/butcherConfig';
 import { getCommissionRate } from '../../lib/rates';
 import { getRatesFromSheet } from '../../lib/sheets';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
