@@ -148,7 +148,7 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
   const isMeatCategory = categoryName.toLowerCase() === 'steak fish';
   
   // For fish butchers, always show all three sizes (small, medium, big)
-  // For meat items, use only default size
+  // For meat products, use only default size
   // Use the imported isFishButcher function which includes test_fish
   const hasComplexSizing = isFishButcher(butcherId) && !isMeatCategory;
 
@@ -166,7 +166,7 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
         available: false // Set as unavailable since all prices are 0
       });
     } else if (!hasComplexSizing && item.sizes.length === 0) {
-      // For meat items, initialize with default size
+      // For meat products, initialize with default size
       const initialSize: MenuItemSize = {
         id: `s-${Date.now()}`,
         size: 'default',

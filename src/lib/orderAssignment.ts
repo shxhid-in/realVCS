@@ -92,7 +92,7 @@ export const assignOrderToButcher = (order: Order): string[] => {
   // If no specific match, assign based on item type priority
   if (possibleButchers.length === 0) {
     if (itemTypes.has('chicken') || itemTypes.has('mutton') || itemTypes.has('beef')) {
-      // Meat items - prefer Usaj (has beef) over PKD
+      // Meat products - prefer Usaj (has beef) over PKD
       possibleButchers.push('usaj');
     } else if (itemTypes.has('fish') || itemTypes.has('seafood')) {
       // Fish items - assign to any fish butcher

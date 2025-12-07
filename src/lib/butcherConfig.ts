@@ -186,7 +186,7 @@ export interface ButcherConfig {
   commissionRates: Record<string, number>; // Category name -> commission rate (decimal)
   markupRates?: Record<string, number>; // Category name -> markup rate (decimal)
   orderSheetTab: string; // Tab name in ButcherPOS sheet
-  meatSheetTab?: string; // Tab name in Menu sheet for meat items (for mixed butchers)
+  meatSheetTab?: string; // Tab name in Menu sheet for meat products (for mixed butchers)
   fishSheetTab?: string; // Tab name in Menu sheet for fish items (for mixed butchers)
 }
 
@@ -391,7 +391,7 @@ export function extractEnglishName(fullName: string): string {
     const parts = fullName.split(' - ');
     return parts[1].trim(); // English name is in the middle
   }
-  // If not three-language format, return as is (for meat items)
+  // If not three-language format, return as is (for meat products)
   return fullName.trim();
 }
 
@@ -664,6 +664,53 @@ export function getFishItemFullName(englishName: string): string {
   
   // If no match found, return original name
   return englishName;
+}
+
+// ============================================================================
+// DEFAULT BUTCHER RATES (for backward compatibility with sheet operations)
+// ============================================================================
+
+import type { ButcherRates } from './types';
+
+/**
+ * Get all butcher rates with default values from config
+ * Used for initializing rates in Google Sheets
+ */
+export function getDefaultButcherRates(): ButcherRates[] {
+  const butcherIds = Object.keys(BUTCHER_CONFIGS);
+  
+  return butcherIds.map(butcherId => {
+    const config = getButcherConfig(butcherId);
+    if (!config) {
+      return {
+        butcherId,
+        butcherName: butcherId,
+        commissionRates: [],
+        markupRates: []
+      };
+    }
+    
+    // Convert commissionRates from Record to CommissionRate[]
+    const commissionRates = Object.entries(config.commissionRates).map(([category, rate]) => ({
+      butcherId,
+      category,
+      rate
+    }));
+    
+    // Convert markupRates from Record to MarkupRate[]
+    const markupRates = Object.entries(config.markupRates || {}).map(([category, rate]) => ({
+      butcherId,
+      category,
+      rate
+    }));
+    
+    return {
+      butcherId,
+      butcherName: config.name,
+      commissionRates,
+      markupRates
+    };
+  });
 }
 
 // ============================================================================

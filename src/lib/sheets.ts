@@ -2,8 +2,18 @@
 
 import { google } from 'googleapis';
 import type { Order, OrderItem, MenuCategory, Butcher, MenuItem, CommissionRate, MarkupRate, ButcherRates } from './types';
-import { freshButchers as butchers, getFishItemFullName } from './butcherConfig';
-import { getDefaultButcherRates, getCommissionRate, getMarkupRate } from './rates';
+import { 
+  freshButchers as butchers, 
+  getFishItemFullName,
+  getButcherType,
+  getButcherConfig,
+  findCategoryForItem,
+  getPriceSheetTab,
+  getCommissionRate,
+  getMarkupRate,
+  getItemTypeFromCategory,
+  getDefaultButcherRates
+} from './butcherConfig';
 import { measureApiCall } from './apiMonitor';
 import {normalizeItemName} from './matchingUtils';
 // Note: Caching removed from server actions due to Next.js restrictions
@@ -305,7 +315,7 @@ const populateDefaultItems = async (butcherId: string) => {
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
+        const isMeatButcher = getButcherType(butcherId) === 'meat';
         
         // Different column structures based on butcher type
         const range = isMeatButcher ? `${tabName}!A2:F` : `${tabName}!A2:G`;
@@ -363,7 +373,7 @@ const getDefaultItemsForButcher = (butcherId: string) => {
     ];
 
     // Return appropriate items based on butcher type
-    if (['kak', 'ka_sons', 'alif'].includes(butcherId)) {
+    if (getButcherType(butcherId) === 'fish') {
         return fishItems;
     } else {
         return commonItems;
@@ -384,7 +394,7 @@ const fetchPurchasePrices = async (butcherId: string): Promise<Record<string, nu
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
+        const isMeatButcher = getButcherType(butcherId) === 'meat';
         
         // Different column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
@@ -404,7 +414,7 @@ const fetchPurchasePrices = async (butcherId: string): Promise<Record<string, nu
             if (isMeatButcher) {
                 // Meat butchers: Item Name, Category, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , purchasePriceStr] = row;
-                size = 'default'; // Meat items don't have sizes
+                size = 'default'; // Meat products don't have sizes
             } else {
                 // Fish butchers: Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , size, purchasePriceStr] = row;
@@ -489,14 +499,14 @@ function levenshteinDistance(str1: string, str2: string): number {
     return matrix[str2.length][str1.length];
 }
 
-// Helper function to determine if a butcher is a meat butcher
+// Helper function to determine if a butcher is a meat butcher (uses getButcherType)
 function isMeatButcher(butcherId: string): boolean {
-    return ['usaj', 'usaj_mutton', 'pkd'].includes(butcherId);
+    return getButcherType(butcherId) === 'meat';
 }
 
-// Helper function to determine if a butcher is a fish butcher
+// Helper function to determine if a butcher is a fish butcher (uses getButcherType)
 function isFishButcher(butcherId: string): boolean {
-    return ['kak', 'ka_sons', 'alif'].includes(butcherId);
+    return getButcherType(butcherId) === 'fish';
 }
 
 /**
@@ -518,7 +528,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
+        const isMeatButcher = getButcherType(butcherId) === 'meat';
         
         // Updated column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
@@ -548,7 +558,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
             if (isMeatButcher) {
                 // Meat butchers: Item Name, Category, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , purchasePrice] = row;
-                size = 'default'; // Meat items don't have sizes
+                size = 'default'; // Meat products don't have sizes
                 console.log(`Meat butcher row parsing:`, { 
                     itemName, 
                     purchasePrice, 
@@ -598,7 +608,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                         const nameParts = orderItemName.split(' - ');
                         orderEnglishName = nameParts[1].trim(); // English name is in the middle
                     }
-                    // For meat items (single name), use the name directly
+                    // For meat products (single name), use the name directly
                     
                     // Get order item details for better matching
                     const orderItem = orderItems?.find(item => item.name === orderItemName);
@@ -656,7 +666,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                             }
                         }
                         
-                        // No longer using "meat" suffix for fish butchers' meat items
+                        // No longer using "meat" suffix for fish butchers' steak fish items
                         // Fish butchers will match items using original names
                         
                         // Try exact match with original item name (case-insensitive)
@@ -1778,8 +1788,8 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
         }
 
         // Determine butcher type
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
-        const isFishButcher = ['kak', 'ka_sons', 'alif','test_fish'].includes(butcherId);
+        const isMeatButcher = getButcherType(butcherId) === 'meat';
+        const isFishButcher = getButcherType(butcherId) === 'fish';
         
         // Clear existing data
         const clearRange = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
@@ -1806,15 +1816,12 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
                         itemName = nameParts[1].trim(); // Extract English name
                     }
                     
-                    // No longer adding "meat" suffix for fish butchers' meat items
+                    // No longer adding "meat" suffix for fish butchers' steak fish items
                     // Fish butchers will use the original item names without suffix
                     
-                    // Calculate selling price with markup based on category (load from Google Sheets)
-                    const categoryName = category.name.toLowerCase();
-                    const customRates = await getRatesFromSheet();
-                    const butcherCustomRates = customRates.find(r => r.butcherId === butcherId);
-                    
-                    const markupRate = getMarkupRate(butcherId, categoryName, butcherCustomRates?.markupRates);
+                    // Calculate selling price with markup based on category from butcherConfig
+                    const categoryName = category.name;
+                    const markupRate = getMarkupRate(butcherId, categoryName);
                     const sellingPrice = Math.round(size.price * (1 + markupRate));
                     
                     // Prepare row data
@@ -1908,7 +1915,7 @@ export const getMenuFromSheet = async (butcherId: string): Promise<MenuCategory[
         }
 
         // Determine butcher type
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
+        const isMeatButcher = getButcherType(butcherId) === 'meat';
         
         // Read data from sheet
         const range = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
@@ -1931,7 +1938,7 @@ export const getMenuFromSheet = async (butcherId: string): Promise<MenuCategory[
                 // Fish butchers: Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight, Date
                 [itemName, categoryName, size, purchasePrice, sellingPrice, unit, nosWeight, date] = row;
                 
-                // Handle empty size for meat items
+                // Handle empty size for meat products
                 if (!size && categoryName && categoryName.toLowerCase().includes('meat')) {
                     size = 'default';
                 }
@@ -2135,7 +2142,7 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
         }
 
         // Determine if this is a meat butcher (no size column)
-        const isMeatButcher = ['pkd', 'usaj', 'usaj_mutton','test_meat'].includes(butcherId);
+        const isMeatButcher = getButcherType(butcherId) === 'meat';
         
         // Different column structures based on butcher type
         // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
@@ -2159,7 +2166,7 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
             if (isMeatButcher) {
                 // Meat butchers: Item Name, Category, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , purchasePrice] = row;
-                size = 'default'; // Meat items don't have sizes
+                size = 'default'; // Meat products don't have sizes
             } else {
                 // Fish butchers: Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , size, purchasePrice] = row;
@@ -2254,11 +2261,9 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
                 purchasePrice = 0; // Default price per kg
             }
 
-            // Get commission rate for this item's category (load from Google Sheets)
+            // Get commission rate for this item's category from butcherConfig
             const itemCategory = item.category || 'default';
-            const customRates = await getRatesFromSheet();
-            const butcherCustomRates = customRates.find(r => r.butcherId === butcherId);
-            const commissionRate = getCommissionRate(butcherId, itemCategory, butcherCustomRates?.commissionRates);
+            const commissionRate = getCommissionRate(butcherId, itemCategory);
 
             // Calculate butcher earnings: purchase price - commission
             const butcherPricePerUnit = purchasePrice - (purchasePrice * commissionRate);
@@ -2360,6 +2365,7 @@ const calculateRevenueFromPreparingWeights = async (
       const { price: purchasePrice, category: menuCategory } = await getPurchasePriceFromMenu(butcherId, itemName, itemSize);
       // Use category from menu (found when looking up price) instead of item.category
       const category = menuCategory || item.category || 'default';
+      // Get commission rate from butcherConfig (no need for custom rates parameter)
       const commissionRate = getCommissionRate(butcherId, category);
       
       // Debug logging for revenue calculation
@@ -2402,8 +2408,8 @@ export const calculateOrderRevenue = async (order: Order, butcherId: string): Pr
   const itemRevenues: { [itemName: string]: number } = {};
   
   // Helper functions for butcher type detection
-  const isFishButcher = (butcherId: string) => ['kak', 'ka_sons', 'alif','test_fish'].includes(butcherId);
-  const fishButcher = isFishButcher(butcherId);
+  const butcherType = getButcherType(butcherId);
+  const fishButcher = butcherType === 'fish';
   
   for (const item of order.items) {
     const itemName = item.name;
@@ -2746,31 +2752,31 @@ export const getPurchasePriceFromMenu = async (
   itemName: string,
   size: string = 'default'
 ): Promise<{ price: number; category: string }> => {
-  // Butcher name mapping
-  const butcherNames: Record<string, string> = {
-    'usaj': 'Usaj_Meat_Hub',
-    'usaj_mutton': 'Usaj_Mutton_Shop',
-    'pkd': 'PKD_Stall',
-    'kak': 'KAK',
-    'ka_sons': 'KA_Sons',
-    'alif': 'Alif',
-    'test_fish': 'Test_Fish_Butcher',
-    'test_meat': 'Test_Meat_Butcher'
-  };
-  const tabName = butcherNames[butcherId] || butcherId;
-  
   try {
+    // Step 1: Find category for item using name matching
+    const categoryName = findCategoryForItem(butcherId, itemName);
+    if (!categoryName) {
+      console.warn(`[getPurchasePriceFromMenu] No category found for item "${itemName}" in butcher "${butcherId}"`);
+      return { price: 0, category: 'default' };
+    }
+    
+    // Step 2: Get the correct sheet tab based on butcher type and category
+    const tabName = getPriceSheetTab(butcherId, categoryName);
+    if (!tabName) {
+      console.error(`[getPurchasePriceFromMenu] No sheet tab found for butcher "${butcherId}" and category "${categoryName}"`);
+      return { price: 0, category: categoryName };
+    }
+    
     const sheets = await getSheetSheetsClient('menu');
     const spreadsheetId = process.env.MENU_POS_SHEET_ID;
     if (!spreadsheetId) {
       console.error('Menu POS Spreadsheet ID not found');
-      return { price: 0, category: 'default' };
+      return { price: 0, category: categoryName };
     }
     
-    // Determine if this is a meat butcher
-    // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns, no Size column)
-    // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns, has Size column)
-    const isMeat = ['usaj', 'usaj_mutton', 'pkd', 'test_meat'].includes(butcherId);
+    // Determine if this is a meat butcher based on category
+    const itemType = getItemTypeFromCategory(categoryName);
+    const isMeat = itemType === 'meat';
     
     // For meat butchers: Purchase Price is in column C (index 2)
     // For fish butchers: Size is in column C (index 2), Purchase Price is in column D (index 3)
@@ -2828,8 +2834,8 @@ export const getPurchasePriceFromMenu = async (
               parsedPrice: price
             });
             if (price > 0) {
-              const category = (row[1] || 'default').trim();
-              return { price, category };
+              // Use the category we found from matching, not from sheet
+              return { price, category: categoryName };
             }
           }
         }
@@ -2875,18 +2881,21 @@ export const getPurchasePriceFromMenu = async (
           if (row.length > priceColumn) {
             const price = parseFloat(row[priceColumn]) || 0;
             if (price > 0) {
-              const category = (row[1] || 'default').trim();
-              return { price, category };
+              // Use the category we found from matching, not from sheet
+              return { price, category: categoryName };
             }
           }
         }
       }
     }
     
-    // No match found - return 0 with default category
-    return { price: 0, category: 'default' };
+    // No match found - return 0 with found category
+    console.warn(`[getPurchasePriceFromMenu] No price found for "${itemName}" in sheet tab "${tabName}"`);
+    return { price: 0, category: categoryName };
   } catch (error) {
     console.error(`[Order] Error fetching purchase price for "${itemName}" in ${butcherId}:`, error);
-    return { price: 0, category: 'default' };
+    // Try to get category even on error
+    const categoryName = findCategoryForItem(butcherId, itemName) || 'default';
+    return { price: 0, category: categoryName };
   }
 };
