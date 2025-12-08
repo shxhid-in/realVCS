@@ -170,8 +170,7 @@ export const BUTCHER_PASSWORDS: Record<string, string> = {
   'alif': 'password',
   'test_meat': 'test',
   'test_fish': 'test',
-  'tendor_chops': 'password',
-  // Add mixed butcher passwords here when created
+  'tender_chops': 'password',
 };
 
 // ============================================================================
@@ -334,26 +333,34 @@ export const BUTCHER_CONFIGS: Record<string, ButcherConfig> = {
     },
     orderSheetTab: 'Test_Fish_Butcher',
     fishSheetTab: 'Test_Fish_Butcher'
-  }
+  },
   
-  // Mixed butchers will be added here when needed
-  // Example:
-  // mixed_1: {
-  //   id: 'mixed_1',
-  //   name: 'Mixed Butcher',
-  //   type: 'mixed',
-  //   categories: ['chicken', 'mutton', 'sea-water-fish', 'fresh-water-fish', 'steak-fish'],
-  //   commissionRates: {
-  //     'Chicken': 0.10,
-  //     'Mutton': 0.12,
-  //     'Sea Water Fish': 0.07,
-  //     'Fresh Water Fish': 0.07,
-  //     'Steak Fish': 0.07
-  //   },
-  //   orderSheetTab: 'Mixed_Butcher',
-  //   meatSheetTab: 'Mixed_1_Meat',
-  //   fishSheetTab: 'Mixed_1_Fish'
-  // }
+  // Mixed Butchers
+  tender_chops: {
+    id: 'tender_chops',
+    name: 'Tender Chops',
+    type: 'mixed',
+    categories: ['chicken', 'mutton', 'beef', 'sea-water-fish', 'fresh-water-fish', 'steak-fish'],
+    commissionRates: {
+      'Chicken': 0.10,
+      'Mutton': 0.10,
+      'Beef': 0.10,
+      'Sea Water Fish': 0.07,
+      'Fresh Water Fish': 0.07,
+      'Steak Fish': 0.07
+    },
+    markupRates: {
+      'Chicken': 0.05,
+      'Mutton': 0.05,
+      'Beef': 0.05,
+      'Sea Water Fish': 0.05,
+      'Fresh Water Fish': 0.05,
+      'Steak Fish': 0.05
+    },
+    orderSheetTab: 'Tender_Chops',
+    meatSheetTab: 'Tender_Chops_Meat',
+    fishSheetTab: 'Tender_Chops_Fish'
+  }
 };
 
 // ============================================================================
@@ -772,7 +779,8 @@ export const freshButchers: Butcher[] = (() => {
     'ka_sons',
     'alif',
     'test_meat',
-    'test_fish'
+    'test_fish',
+    'tender_chops'
   ];
 
   return butcherIds.map(butcherId => {
