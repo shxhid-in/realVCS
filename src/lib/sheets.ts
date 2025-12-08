@@ -1893,17 +1893,28 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             const { centralAPIClient } = await import('./centralAPIClient');
             const { getButcherNameFromId } = await import('./butcherMapping');
             const { queueMenuUpdate } = await import('./orderQueue');
+            const { isMixedButcher, getItemTypeFromCategory } = await import('./butcherConfig');
             
             const butcherName = getButcherNameFromId(butcherId) || butcherId;
             
+            // Determine menu type for mixed butchers
+            let menuType: 'meat' | 'fish' | undefined = undefined;
+            if (isMixedButcher(butcherId) && menu.length > 0) {
+                const firstCategory = menu[0];
+                const categoryType = getItemTypeFromCategory(firstCategory.name);
+                if (categoryType === 'meat' || categoryType === 'fish') {
+                    menuType = categoryType;
+                }
+            }
+            
             // Attempt to notify Central API
             try {
-                await centralAPIClient.notifyMenuUpdate(butcherId, butcherName);
-                console.log(`[Menu] Updated: ${butcherName}`);
+                await centralAPIClient.notifyMenuUpdate(butcherId, butcherName, menuType);
+                console.log(`[Menu] Updated: ${butcherName}${menuType ? ` (${menuType})` : ''}`);
             } catch (error: any) {
                 // If notification fails, queue it for retry
                 console.warn(`[Menu] Failed to notify Central API, queuing for retry:`, error.message);
-                queueMenuUpdate(butcherId, butcherName);
+                queueMenuUpdate(butcherId, butcherName, menuType);
             }
         } catch (error: any) {
             // Log but don't fail menu save if notification setup fails

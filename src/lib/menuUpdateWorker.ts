@@ -33,8 +33,8 @@ async function processMenuUpdateQueue(): Promise<void> {
     }
 
     try {
-      // Attempt to notify Central API
-      await centralAPIClient.notifyMenuUpdate(queued.butcherId, queued.butcherName);
+      // Attempt to notify Central API (include menuType if available)
+      await centralAPIClient.notifyMenuUpdate(queued.butcherId, queued.butcherName, queued.menuType);
       
       // Success! Remove from queue
       removeQueuedMenuUpdate(queued.butcherId, queued.butcherName);

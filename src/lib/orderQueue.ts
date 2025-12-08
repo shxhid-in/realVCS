@@ -30,6 +30,7 @@ interface QueuedMenuUpdate {
   timestamp: Date;
   retryCount: number;
   lastRetryAt?: Date;
+  menuType?: 'meat' | 'fish';
 }
 
 // In-memory queues (in production, use Redis or database)
@@ -140,13 +141,15 @@ export function incrementResponseRetry(orderNo: number): boolean {
  */
 export function queueMenuUpdate(
   butcherId: string,
-  butcherName: string
+  butcherName: string,
+  menuType?: 'meat' | 'fish'
 ): void {
   const queuedUpdate: QueuedMenuUpdate = {
     butcherId,
     butcherName,
     timestamp: new Date(),
-    retryCount: 0
+    retryCount: 0,
+    menuType
   };
   
   menuUpdateQueue.push(queuedUpdate);

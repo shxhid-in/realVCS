@@ -143,19 +143,34 @@ class CentralAPIClient {
    */
   async notifyMenuUpdate(
     butcherId: string,
-    butcherName: string
+    butcherName: string,
+    menuType?: 'meat' | 'fish'
   ): Promise<void> {
     try {
       const token = await this.getToken(butcherName);
       
-      const payload = {
+      const payload: {
+        butcher: string;
+        butcherId: string;
+        timestamp: string;
+        source: string;
+        menuType?: 'meat' | 'fish';
+      } = {
         butcher: butcherName,
         butcherId: butcherId,
         timestamp: new Date().toISOString(),
         source: 'vcs'
       };
 
-      console.log(`[CentralAPI] Notifying menu update for ${butcherName} (${butcherId})`);
+      // Add menuType to payload if provided (for mixed butchers)
+      if (menuType) {
+        payload.menuType = menuType;
+      }
+
+      const logMessage = menuType 
+        ? `[CentralAPI] Notifying ${menuType} menu update for ${butcherName} (${butcherId})`
+        : `[CentralAPI] Notifying menu update for ${butcherName} (${butcherId})`;
+      console.log(logMessage);
 
       const response = await this.axiosInstance.post(
         '/api/menu/update',
