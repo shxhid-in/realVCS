@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-// Temporarily disable Google Fonts to avoid network issues during build
-// import { Inter } from 'next/font/google';
+import { Sansita } from 'next/font/google';
 import { AuthProvider } from '../context/AuthContext';
 import { ThemeProvider } from '../components/ThemeProvider';
 import { Toaster } from '../components/ui/toaster';
@@ -9,10 +8,11 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getManifestUrl } from '../lib/manifest';
 
 // Use system fonts as fallback
-const inter = { 
+const inter = Sansita({ 
   variable: '--font-inter',
-  className: 'font-sans'
-};
+  subsets: ['latin'],
+  weight: ['400', '700', '800', '900'],
+});
 
 export const metadata: Metadata = {
   title: 'VCS - Vendor Communication System',

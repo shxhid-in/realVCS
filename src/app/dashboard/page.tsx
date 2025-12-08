@@ -1858,7 +1858,7 @@ export default function OrderManagementPage() {
       toast({ 
         variant: "destructive", 
         title: "Failed to fetch orders", 
-        description: error 
+        description: "Could not fetch orders." 
       });
     }
   }, [error, toast]);

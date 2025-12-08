@@ -171,6 +171,7 @@ export const BUTCHER_PASSWORDS: Record<string, string> = {
   'test_meat': 'test',
   'test_fish': 'test',
   'tender_chops': 'password',
+  // Add mixed butcher passwords here when created
 };
 
 // ============================================================================
@@ -343,7 +344,7 @@ export const BUTCHER_CONFIGS: Record<string, ButcherConfig> = {
     categories: ['chicken', 'mutton', 'beef', 'sea-water-fish', 'fresh-water-fish', 'steak-fish'],
     commissionRates: {
       'Chicken': 0.10,
-      'Mutton': 0.10,
+      'Mutton': 0.08,
       'Beef': 0.10,
       'Sea Water Fish': 0.07,
       'Fresh Water Fish': 0.07,
@@ -351,8 +352,8 @@ export const BUTCHER_CONFIGS: Record<string, ButcherConfig> = {
     },
     markupRates: {
       'Chicken': 0.05,
-      'Mutton': 0.05,
-      'Beef': 0.05,
+      'Mutton': 0.00,
+      'Beef': 0.00,
       'Sea Water Fish': 0.05,
       'Fresh Water Fish': 0.05,
       'Steak Fish': 0.05
@@ -549,7 +550,8 @@ export function getButcherMenuCategories(butcherId: string): MenuCategory[] {
   const categories: MenuCategory[] = [];
   
   for (const categoryId of config.categories) {
-    const category = CATEGORIES[categoryId as keyof typeof CATEGORIES];
+    // Find category by ID (not by key) since CATEGORIES uses camelCase keys but IDs use kebab-case
+    const category = Object.values(CATEGORIES).find(cat => cat.id === categoryId);
     if (category) {
       categories.push({
         id: category.id as string,

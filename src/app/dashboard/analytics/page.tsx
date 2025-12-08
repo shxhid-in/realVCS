@@ -127,7 +127,7 @@ export default function AnalyticsPage() {
       toast({
         variant: "destructive",
         title: "Failed to load analytics data",
-        description: err.message || "Try again later"
+        description: "Try again later"
       });
     } finally {
       setIsLoading(false);
@@ -183,7 +183,7 @@ export default function AnalyticsPage() {
       toast({
         variant: "destructive",
         title: "Failed to load analytics data",
-        description: error.message || "Try again later"
+        description: "Try again later"
       });
     } finally {
       setIsLoading(false);

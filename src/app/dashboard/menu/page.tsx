@@ -10,11 +10,12 @@ import { Switch } from "../../../components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
 import { Button } from "../../../components/ui/button"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../../../components/ui/accordion"
+import { Tabs, TabsList, TabsTrigger } from "../../../components/ui/tabs"
 import { useToast } from "../../../hooks/use-toast"
 import React, { useState, useEffect } from "react"
 import type { Butcher, MenuCategory, MenuItem, MenuItemSize } from "../../../lib/types"
 import { saveMenuToSheet, mergeMenuFromSheet } from "../../../lib/sheets"
-import { Loader2, RefreshCw } from "lucide-react"
+import { Loader2, RefreshCw, Beef, Fish } from "lucide-react"
 import { cn } from "../../../lib/utils"
 
 // Helper function to get display name for items
@@ -147,10 +148,13 @@ const MenuItemEditor = ({ item, onUpdate, onRemoveSize, butcherId, categoryName 
   
   const isMeatCategory = categoryName.toLowerCase() === 'steak fish';
   
-  // For fish butchers, always show all three sizes (small, medium, big)
+  // Determine if this is a fish category (for mixed butchers)
+  const isFishCategory = getItemTypeFromCategory(categoryName) === 'fish';
+  
+  // For fish butchers OR mixed butchers viewing fish categories, show all three sizes (small, medium, big)
   // For meat products, use only default size
-  // Use the imported isFishButcher function which includes test_fish
-  const hasComplexSizing = isFishButcher(butcherId) && !isMeatCategory;
+  const isMixed = isMixedButcher(butcherId);
+  const hasComplexSizing = (isFishButcher(butcherId) || (isMixed && isFishCategory)) && !isMeatCategory;
 
   // Initialize sizes if they don't exist
   React.useEffect(() => {
@@ -257,76 +261,229 @@ export default function MenuManagementPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDataFromSheet, setIsDataFromSheet] = useState(false); // Track if data is loaded from sheet
+
+  // Tab state with session storage persistence (only for mixed butchers)
+  const [activeTab, setActiveTab] = useState<'meat' | 'fish'>('meat');
   
-  // Tab state with session storage persistence
-  const getInitialTab = (): 'meat' | 'fish' => {
-    if (!butcher) return 'meat';
-    const storageKey = `menu-tab-${butcher.id}`;
-    const savedTab = typeof window !== 'undefined' ? sessionStorage.getItem(storageKey) : null;
-    return (savedTab === 'meat' || savedTab === 'fish') ? savedTab : 'meat';
-  };
-  
-  const [activeTab, setActiveTab] = useState<'meat' | 'fish'>(getInitialTab);
-  
-  // Save tab to session storage when it changes
+  // Initialize tab from session storage when butcher is available (only for mixed butchers)
   useEffect(() => {
     if (butcher && typeof window !== 'undefined') {
-      const storageKey = `menu-tab-${butcher.id}`;
-      sessionStorage.setItem(storageKey, activeTab);
-    }
-  }, [activeTab, butcher?.id]);
-  
-  // Reset tab to 'meat' when butcher changes
-  useEffect(() => {
-    if (butcher) {
-      const storageKey = `menu-tab-${butcher.id}`;
-      const savedTab = typeof window !== 'undefined' ? sessionStorage.getItem(storageKey) : null;
-      setActiveTab((savedTab === 'meat' || savedTab === 'fish') ? savedTab : 'meat');
+      const isMixed = isMixedButcher(butcher.id);
+      if (isMixed) {
+        const storageKey = `menu-tab-${butcher.id}`;
+        const savedTab = sessionStorage.getItem(storageKey);
+        const initialTab = (savedTab === 'meat' || savedTab === 'fish') ? savedTab : 'meat';
+        setActiveTab(initialTab);
+      } else {
+        // For non-mixed butchers, set a default (won't affect menu display)
+        setActiveTab('meat');
+      }
     }
   }, [butcher?.id]);
-
-  // Initialize menu with latest data from mockData directly, filtered by active tab
+  
+  // Save tab to session storage when it changes (only for mixed butchers)
   useEffect(() => {
-    if (butcher) {
-      // Import the latest butchers data dynamically to ensure we get the updated data
-      import('../../../lib/butcherConfig').then(({ freshButchers: butchers }) => {
-        const latestButcherData = butchers.find(b => b.id === butcher.id);
-        if (latestButcherData) {
-          const isMixed = isMixedButcher(butcher.id);
-          const filteredMenu = isMixed 
-            ? latestButcherData.menu.filter(cat => {
-                const categoryType = getItemTypeFromCategory(cat.name);
-                if (activeTab === 'meat') {
-                  return categoryType === 'meat';
-                } else {
-                  return categoryType === 'fish';
-                }
-              })
-            : latestButcherData.menu;
-          setMenu(filteredMenu);
-        } else {
-          const isMixed = isMixedButcher(butcher.id);
-          const filteredMenu = isMixed 
-            ? butcher.menu.filter(cat => {
-                const categoryType = getItemTypeFromCategory(cat.name);
-                if (activeTab === 'meat') {
-                  return categoryType === 'meat';
-                } else {
-                  return categoryType === 'fish';
-                }
-              })
-            : butcher.menu;
-          setMenu(filteredMenu);
-        }
-      });
+    if (butcher && typeof window !== 'undefined') {
+      const isMixed = isMixedButcher(butcher.id);
+      if (isMixed) {
+        const storageKey = `menu-tab-${butcher.id}`;
+        sessionStorage.setItem(storageKey, activeTab);
+      }
     }
+  }, [activeTab, butcher?.id]);
+
+  // Initialize menu: First check sessionStorage, then fallback to butcherConfig
+  useEffect(() => {
+    if (!butcher) {
+      setMenu([]);
+      return;
+    }
+    
+    const storageKey = `menu-data-${butcher.id}`;
+    const isMixed = isMixedButcher(butcher.id);
+    
+    // Check if we have persisted menu data in sessionStorage
+    if (typeof window !== 'undefined') {
+      const savedMenuData = sessionStorage.getItem(storageKey);
+      if (savedMenuData) {
+        try {
+          const parsedMenu = JSON.parse(savedMenuData) as MenuCategory[];
+          
+          // Validate that we have valid menu data
+          if (!Array.isArray(parsedMenu) || parsedMenu.length === 0) {
+            // Invalid data, clear and load from config
+            sessionStorage.removeItem(storageKey);
+            throw new Error('Invalid menu data in storage');
+          }
+          
+          // Deduplicate categories first to prevent duplicate keys
+          const uniqueMenu = parsedMenu.reduce((acc, cat) => {
+            // Validate category structure
+            if (!cat || !cat.id || !cat.name || !Array.isArray(cat.items)) {
+              return acc; // Skip invalid categories
+            }
+            const existingIndex = acc.findIndex(c => c.id === cat.id);
+            if (existingIndex >= 0) {
+              // Keep the most recent version
+              acc[existingIndex] = cat;
+            } else {
+              acc.push(cat);
+            }
+            return acc;
+          }, [] as MenuCategory[]);
+          
+          // For mixed butchers, filter by active tab
+          if (isMixed) {
+            const filteredMenu = uniqueMenu.filter(cat => {
+              const categoryType = getItemTypeFromCategory(cat.name);
+              const shouldInclude = activeTab === 'meat' 
+                ? categoryType === 'meat' 
+                : categoryType === 'fish';
+              return shouldInclude;
+            });
+            
+            // If filtered menu is empty, check if we should have data for this tab
+            if (filteredMenu.length === 0) {
+              // Check what categories we actually have in storage
+              const meatCategories = uniqueMenu.filter(cat => {
+                const categoryType = getItemTypeFromCategory(cat.name);
+                return categoryType === 'meat';
+              });
+              const fishCategories = uniqueMenu.filter(cat => {
+                const categoryType = getItemTypeFromCategory(cat.name);
+                return categoryType === 'fish';
+              });
+              
+              // If we're on fish tab but only have meat categories (or vice versa), 
+              // it means storage is incomplete - clear and reload from config
+              if (activeTab === 'fish' && fishCategories.length === 0 && meatCategories.length > 0) {
+                // Storage only has meat data, clear it and reload from config to get fish data
+                sessionStorage.removeItem(storageKey);
+                setMenu([]); // Clear menu state to prevent showing wrong items
+                throw new Error('No fish categories in storage, reloading from config');
+              } else if (activeTab === 'meat' && meatCategories.length === 0 && fishCategories.length > 0) {
+                // Storage only has fish data, clear it and reload from config to get meat data
+                sessionStorage.removeItem(storageKey);
+                setMenu([]); // Clear menu state to prevent showing wrong items
+                throw new Error('No meat categories in storage, reloading from config');
+              }
+              // If both are empty, clear menu and load from config
+              if (meatCategories.length === 0 && fishCategories.length === 0) {
+                setMenu([]);
+                // Fall through to load from config
+              }
+            } else {
+              // We have valid filtered data, use it
+              setMenu(filteredMenu);
+              return; // Use saved data, don't load from config
+            }
+            // If we reach here, filtered menu is empty and we should load from config
+          } else {
+            setMenu(uniqueMenu);
+            return; // Use saved data, don't load from config
+          }
+        } catch (error: any) {
+          // Silently handle the error - we'll load from config instead
+          // Only log if it's not our intentional error for missing categories
+          if (error.message && !error.message.includes('categories in storage')) {
+            console.error('[Menu] Error parsing saved menu data:', error);
+          }
+          // Clear corrupted data
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem(storageKey);
+          }
+          // Fall through to load from config
+        }
+      }
+    }
+    
+    // No saved data, load from butcherConfig
+    import('../../../lib/butcherConfig').then(({ freshButchers: butchers, getButcherMenuCategories }) => {
+      // Try to get menu directly from getButcherMenuCategories for more reliable loading
+      const directMenu = getButcherMenuCategories(butcher.id);
+      
+      const latestButcherData = butchers.find(b => b.id === butcher.id);
+      
+      // Use direct menu if available, otherwise fallback to butcher data
+      const fullMenu = directMenu.length > 0 ? directMenu : (latestButcherData?.menu || butcher.menu || []);
+      
+      if (fullMenu.length === 0) {
+        setMenu([]);
+        return;
+      }
+      
+      // Always filter from the full menu, not from already filtered menu
+      if (isMixed) {
+        const filteredMenu = fullMenu.filter(cat => {
+          const categoryType = getItemTypeFromCategory(cat.name);
+          const shouldInclude = activeTab === 'meat' 
+            ? categoryType === 'meat' 
+            : categoryType === 'fish';
+          return shouldInclude;
+        });
+        setMenu(filteredMenu);
+      } else {
+        setMenu(fullMenu);
+      }
+    }).catch(error => {
+      console.error('[Menu] Error loading menu:', error);
+      setMenu([]);
+    });
   }, [butcher?.id, refreshButcherData, activeTab]);
-
-  // Note: Removed polling for menu management as it's unnecessary
-  // Menu data is static and user-controlled, polling only causes issues
-
-
-
+  
+  // Save menu to sessionStorage whenever it changes (for persistence across refresh)
+  useEffect(() => {
+    if (!butcher || menu.length === 0 || typeof window === 'undefined') {
+      return;
+    }
+    
+    const storageKey = `menu-data-${butcher.id}`;
+    const isMixed = isMixedButcher(butcher.id);
+    
+    // For mixed butchers, we need to save the full menu (both meat and fish)
+    // So we need to merge current tab's menu with the other tab's saved menu
+    if (isMixed) {
+      // Get the full saved menu if it exists
+      const savedMenuData = sessionStorage.getItem(storageKey);
+      let fullMenu: MenuCategory[] = [];
+      
+      if (savedMenuData) {
+        try {
+          fullMenu = JSON.parse(savedMenuData) as MenuCategory[];
+        } catch (error) {
+          // If parsing fails, start fresh
+          fullMenu = [];
+        }
+      }
+      
+      // Remove categories from the current tab type, then add current menu
+      const currentTabType = activeTab === 'meat' ? 'meat' : 'fish';
+      fullMenu = fullMenu.filter(cat => {
+        const categoryType = getItemTypeFromCategory(cat.name);
+        return categoryType !== currentTabType;
+      });
+      
+      // Add current menu (already filtered by activeTab) and deduplicate by category ID
+      const mergedMenu = [...fullMenu, ...menu];
+      // Deduplicate categories by ID to prevent duplicate keys
+      const uniqueMenu = mergedMenu.reduce((acc, cat) => {
+        const existingIndex = acc.findIndex(c => c.id === cat.id);
+        if (existingIndex >= 0) {
+          // Replace existing category with new one (in case it was updated)
+          acc[existingIndex] = cat;
+        } else {
+          acc.push(cat);
+        }
+        return acc;
+      }, [] as MenuCategory[]);
+      fullMenu = uniqueMenu;
+      
+      sessionStorage.setItem(storageKey, JSON.stringify(fullMenu));
+    } else {
+      // For non-mixed butchers, just save the current menu
+      sessionStorage.setItem(storageKey, JSON.stringify(menu));
+    }
+  }, [menu, butcher?.id, activeTab]);
 
   if (!butcher) return null;
 
@@ -335,7 +492,7 @@ export default function MenuManagementPage() {
   const isMixed = isMixedButcher(butcher.id);
   
   // Filter categories based on active tab
-  // For mixed butchers: filter by tab type
+  // For mixed butchers: menu state is already filtered by tab, but add safety check
   // For meat/fish butchers: show all categories (but still use tabs for consistency)
   const baseVisibleMenu = menu.filter(cat => {
     // Base visibility rules (hide Mutton for 'usaj')
@@ -343,13 +500,15 @@ export default function MenuManagementPage() {
       return false;
     }
     
-    // For mixed butchers, filter by tab type
+    // Safety check for mixed butchers: ensure we only show categories matching the active tab
     if (isMixed) {
       const categoryType = getItemTypeFromCategory(cat.name);
-      if (activeTab === 'meat') {
-        return categoryType === 'meat';
-      } else {
-        return categoryType === 'fish';
+      const shouldShow = activeTab === 'meat' 
+        ? categoryType === 'meat' 
+        : categoryType === 'fish';
+      if (!shouldShow) {
+        // This shouldn't happen if filtering is working correctly, but add safety check
+        return false;
       }
     }
     
@@ -456,13 +615,13 @@ export default function MenuManagementPage() {
       setIsDataFromSheet(false); // Reset flag after saving
       toast({
         title: "Menu Updated",
-        description: `Your ${activeTab === 'meat' ? 'Meat' : 'Fish'} menu has been successfully saved to the Menu POS Google Sheet.`,
+        description: isMixed ? `${activeTab === 'meat' ? 'Meat' : 'Fish'} menu has been successfully saved.` : "Menu has been successfully saved.",
       });
     } catch (error: any) {
         toast({
             variant: "destructive",
             title: "Update Failed",
-            description: error.message || "Could not save the menu to the sheet.",
+            description: "Could not save the menu.",
         });
     } finally {
       setIsLoading(false);
@@ -503,32 +662,78 @@ export default function MenuManagementPage() {
         : fullMenu;
       
       // Merge with sheet data (only for active tab)
-      const mergedMenu = await mergeMenuFromSheet(butcher.id, tabMenu);
+      // For mixed butchers, pass the active tab to help determine the correct sheet tab
+      const mergedMenu = await mergeMenuFromSheet(butcher.id, tabMenu, isMixed ? activeTab : undefined);
       
-      // Update only the categories in the active tab
-      setMenu(prevMenu => {
-        const updatedMenu = [...prevMenu];
-        mergedMenu.forEach(mergedCat => {
-          const index = updatedMenu.findIndex(cat => cat.id === mergedCat.id);
-          if (index >= 0) {
-            updatedMenu[index] = mergedCat;
-          } else {
-            updatedMenu.push(mergedCat);
+      // For mixed butchers, replace the entire menu with merged categories (already filtered by tab)
+      // For regular butchers, update existing categories
+      let finalMenu: MenuCategory[];
+      if (isMixed) {
+        finalMenu = mergedMenu;
+        setMenu(mergedMenu);
+      } else {
+        finalMenu = (() => {
+          const updatedMenu = [...menu];
+          mergedMenu.forEach(mergedCat => {
+            const index = updatedMenu.findIndex(cat => cat.id === mergedCat.id);
+            if (index >= 0) {
+              updatedMenu[index] = mergedCat;
+            } else {
+              updatedMenu.push(mergedCat);
+            }
+          });
+          return updatedMenu;
+        })();
+        setMenu(finalMenu);
+      }
+      
+      // Update sessionStorage with the loaded data
+      if (typeof window !== 'undefined') {
+        const storageKey = `menu-data-${butcher.id}`;
+        if (isMixed) {
+          // For mixed butchers, merge with other tab's data
+          const savedMenuData = sessionStorage.getItem(storageKey);
+          let fullMenu: MenuCategory[] = [];
+          if (savedMenuData) {
+            try {
+              fullMenu = JSON.parse(savedMenuData) as MenuCategory[];
+            } catch (error) {
+              fullMenu = [];
+            }
           }
-        });
-        return updatedMenu;
-      });
+            const currentTabType = activeTab === 'meat' ? 'meat' : 'fish';
+            fullMenu = fullMenu.filter(cat => {
+              const categoryType = getItemTypeFromCategory(cat.name);
+              return categoryType !== currentTabType;
+            });
+            const mergedMenu = [...fullMenu, ...finalMenu];
+            // Deduplicate categories by ID to prevent duplicate keys
+            const uniqueMenu = mergedMenu.reduce((acc, cat) => {
+              const existingIndex = acc.findIndex(c => c.id === cat.id);
+              if (existingIndex >= 0) {
+                acc[existingIndex] = cat;
+              } else {
+                acc.push(cat);
+              }
+              return acc;
+            }, [] as MenuCategory[]);
+            sessionStorage.setItem(storageKey, JSON.stringify(uniqueMenu));
+        } else {
+          sessionStorage.setItem(storageKey, JSON.stringify(finalMenu));
+        }
+      }
+      
       setIsDataFromSheet(true); // Mark as loaded from sheet
       
       toast({
         title: "Menu Loaded",
-        description: `Menu loaded for ${activeTab === 'meat' ? 'Meat' : 'Fish'} tab from Google Sheet.`,
+        description: isMixed ? `Menu loaded for ${activeTab === 'meat' ? 'Meat' : 'Fish'}tab.` : "Menu loaded.",
       });
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Load Failed",
-        description: error.message || "Could not load menu from the sheet.",
+        description: "Could not load menu.",
       });
     } finally {
       setIsLoading(false);
@@ -547,8 +752,9 @@ export default function MenuManagementPage() {
       if (latestButcherData) {
         // Filter to active tab categories only for mixed butchers
         const isMixed = isMixedButcher(butcher.id);
+        const fullMenu = latestButcherData.menu;
         const tabMenu = isMixed 
-          ? latestButcherData.menu.filter(cat => {
+          ? fullMenu.filter(cat => {
               const categoryType = getItemTypeFromCategory(cat.name);
               if (activeTab === 'meat') {
                 return categoryType === 'meat';
@@ -556,32 +762,77 @@ export default function MenuManagementPage() {
                 return categoryType === 'fish';
               }
             })
-          : latestButcherData.menu;
+          : fullMenu;
         
-        // Update only the categories in the active tab
-        setMenu(prevMenu => {
-          const updatedMenu = [...prevMenu];
-          tabMenu.forEach(tabCat => {
-            const index = updatedMenu.findIndex(cat => cat.id === tabCat.id);
-            if (index >= 0) {
-              updatedMenu[index] = tabCat;
-            } else {
-              updatedMenu.push(tabCat);
+        // For mixed butchers, replace the entire menu with filtered categories
+        // For regular butchers, update existing categories
+        let finalMenu: MenuCategory[];
+        if (isMixed) {
+          finalMenu = tabMenu;
+          setMenu(tabMenu);
+        } else {
+          finalMenu = (() => {
+            const updatedMenu = [...menu];
+            tabMenu.forEach(tabCat => {
+              const index = updatedMenu.findIndex(cat => cat.id === tabCat.id);
+              if (index >= 0) {
+                updatedMenu[index] = tabCat;
+              } else {
+                updatedMenu.push(tabCat);
+              }
+            });
+            return updatedMenu;
+          })();
+          setMenu(finalMenu);
+        }
+        
+        // Update sessionStorage with the reset data
+        if (typeof window !== 'undefined') {
+          const storageKey = `menu-data-${butcher.id}`;
+          if (isMixed) {
+            // For mixed butchers, merge with other tab's data
+            const savedMenuData = sessionStorage.getItem(storageKey);
+            let fullMenu: MenuCategory[] = [];
+            if (savedMenuData) {
+              try {
+                fullMenu = JSON.parse(savedMenuData) as MenuCategory[];
+              } catch (error) {
+                fullMenu = [];
+              }
             }
-          });
-          return updatedMenu;
-        });
+            const currentTabType = activeTab === 'meat' ? 'meat' : 'fish';
+            fullMenu = fullMenu.filter(cat => {
+              const categoryType = getItemTypeFromCategory(cat.name);
+              return categoryType !== currentTabType;
+            });
+            const mergedMenu = [...fullMenu, ...finalMenu];
+            // Deduplicate categories by ID to prevent duplicate keys
+            const uniqueMenu = mergedMenu.reduce((acc, cat) => {
+              const existingIndex = acc.findIndex(c => c.id === cat.id);
+              if (existingIndex >= 0) {
+                acc[existingIndex] = cat;
+              } else {
+                acc.push(cat);
+              }
+              return acc;
+            }, [] as MenuCategory[]);
+            sessionStorage.setItem(storageKey, JSON.stringify(uniqueMenu));
+          } else {
+            sessionStorage.setItem(storageKey, JSON.stringify(finalMenu));
+          }
+        }
+        
         setIsDataFromSheet(false); // Reset to mock data
         toast({
           title: "Reset to Mock Data",
-          description: `Menu reset for ${activeTab === 'meat' ? 'Meat' : 'Fish'} tab.`,
+          description: isMixed ? `Menu reset for ${activeTab === 'meat' ? 'Meat' : 'Fish'} tab.` : "Menu reset to mock data.",
         });
       }
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Reset Failed",
-        description: error.message || "Could not reset to mock data.",
+        description: "Could not reset to mock data.",
       });
     } finally {
       setIsLoading(false);
@@ -626,41 +877,27 @@ export default function MenuManagementPage() {
         </div>
       </div>
 
-      {/* Tab Selection - Sticky when scrolling */}
-      <div className="sticky top-0 z-10 bg-background border-b pb-2 mb-4">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('meat')}
-            className={cn(
-              "px-4 py-2 rounded-md text-sm font-medium transition-colors",
-              activeTab === 'meat'
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            )}
-          >
-            Meat
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('fish')}
-            className={cn(
-              "px-4 py-2 rounded-md text-sm font-medium transition-colors",
-              activeTab === 'fish'
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            )}
-          >
-            Fish
-          </button>
+      {/* Tab Selection - Only show for mixed butchers */}
+      {isMixed && (
+        <div className="sticky top-0 z-10 bg-background border-b pb-2 mb-4">
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'meat' | 'fish')} className="w-full">
+            <TabsList className="w-full max-w-full flex sm:grid sm:grid-cols-2 gap-1 sm:gap-2 p-1 sm:p-1 h-auto sm:h-10 px-1 sm:px-1">
+              <TabsTrigger value="meat" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-1 sm:flex-none">
+                <span>Meat</span>
+              </TabsTrigger>
+              <TabsTrigger value="fish" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-1 sm:flex-none">
+                <span>Fish</span>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-      </div>
+      )}
 
         <Card>
           <CardContent className="p-4 sm:p-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
               <div>
-                <Label htmlFor="menu-search" className="text-xs sm:text-sm">Search items ({activeTab === 'meat' ? 'Meat' : 'Fish'} tab)</Label>
+                <Label htmlFor="menu-search" className="text-xs sm:text-sm">Search items</Label>
                 <Input
                   id="menu-search"
                   type="text"
@@ -683,8 +920,8 @@ export default function MenuManagementPage() {
               <div className="text-sm text-muted-foreground">No items found.</div>
             ) : (
               <Accordion type="multiple" defaultValue={filteredMenu.map(cat => cat.id)} className="w-full">
-                {filteredMenu.map(category => (
-                  <AccordionItem value={category.id} key={category.id}>
+                {filteredMenu.map((category, index) => (
+                  <AccordionItem value={category.id} key={`${category.id}-${index}`}>
                     <AccordionTrigger className="text-lg sm:text-xl font-semibold">{category.name}</AccordionTrigger>
                     <AccordionContent>
                       {/* ✅ FIX: Responsive spacing for menu items */}
@@ -710,7 +947,7 @@ export default function MenuManagementPage() {
         <div className="mt-6 flex justify-end">
           <Button type="submit" disabled={isLoading}>
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {isLoading ? "Saving to Sheet..." : "Save to Google Sheet"}
+            {isLoading ? "Saving..." : isMixed ? `Save ${activeTab === 'meat' ? 'Meat' : 'Fish'} Menu` : "Save Menu"}
           </Button>
         </div>
       </form>

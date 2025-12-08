@@ -22,7 +22,7 @@ export interface MenuCategory {
 }
 
 export interface Butcher {
-  id: 'usaj' | 'usaj_mutton' | 'pkd' | 'kak' | 'ka_sons' | 'alif' | 'test_meat' | 'test_fish';
+  id: 'usaj' | 'usaj_mutton' | 'pkd' | 'kak' | 'ka_sons' | 'alif' | 'test_meat' | 'test_fish' | 'tender_chops';
   name: string;
   password: string;
   menu: MenuCategory[];

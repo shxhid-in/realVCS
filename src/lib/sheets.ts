@@ -813,7 +813,8 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
         }
 
         const sheets = await getButcherSheetsClient(butcherId);
-        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
+        const butcherConfig = getButcherConfig(butcherId);
+        const tabName = butcherConfig?.orderSheetTab;
         
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
@@ -1287,8 +1288,9 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
         }
 
         const sheets = await getButcherSheetsClient(butcherId);
-        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
-        
+        const butcherConfig = getButcherConfig(butcherId);
+        const tabName = butcherConfig?.orderSheetTab;
+
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
@@ -1296,7 +1298,7 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
         // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
-        
+
         // Order Date: Always use today's date in IST
         const orderDate = getISTDate();
         
@@ -1362,8 +1364,9 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
         }
 
         const sheets = await getButcherSheetsClient(butcherId);
-        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
-        
+        const butcherConfig = getButcherConfig(butcherId);
+        const tabName = butcherConfig?.orderSheetTab;
+
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
@@ -1371,7 +1374,7 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
         // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
-        
+
         // Order Date: Always use today's date in IST
         const orderDate = getISTDate();
 
@@ -1467,8 +1470,9 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         }
 
         const sheets = await getButcherSheetsClient(butcherId);
-        const tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS];
-        
+        const butcherConfig = getButcherConfig(butcherId);
+        const tabName = butcherConfig?.orderSheetTab;
+
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
@@ -1476,7 +1480,7 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
-        
+
         // Order Date: Always use today's date in IST
         const orderDate = getISTDate();
         
@@ -1796,8 +1800,8 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             }
         } else {
             tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS] || null;
-            if (!tabName) {
-                throw new Error(`No tab found for butcher: ${butcherId}`);
+        if (!tabName) {
+            throw new Error(`No tab found for butcher: ${butcherId}`);
             }
         }
 
@@ -2052,14 +2056,28 @@ const extractEnglishName = (fullName: string): string => {
 
 /**
  * Merge menu data from sheet with the full menu structure
+ * @param activeTab - For mixed butchers, specify 'meat' or 'fish' to determine which sheet tab to load from
  */
-export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCategory[]): Promise<MenuCategory[]> => {
+export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCategory[], activeTab?: 'meat' | 'fish'): Promise<MenuCategory[]> => {
     try {
-        // For mixed butchers, determine which tab to load from based on first category
+        // For mixed butchers, determine which tab to load from
         const butcherType = getButcherType(butcherId);
         let tabName: string | null = null;
-        if (butcherType === 'mixed' && fullMenu.length > 0) {
-            tabName = getPriceSheetTab(butcherId, fullMenu[0].name);
+        if (butcherType === 'mixed') {
+            if (activeTab) {
+                // Use activeTab to determine which sheet tab to use
+                const config = getButcherConfig(butcherId);
+                if (config) {
+                    tabName = activeTab === 'meat' ? config.meatSheetTab || null : config.fishSheetTab || null;
+                }
+            } else if (fullMenu.length > 0) {
+                // Fallback: determine from first category
+                tabName = getPriceSheetTab(butcherId, fullMenu[0].name);
+            }
+            
+            if (!tabName) {
+                throw new Error(`Could not determine sheet tab for mixed butcher ${butcherId}. Please specify activeTab parameter.`);
+            }
         }
         const sheetMenu = await getMenuFromSheet(butcherId, tabName);
         
