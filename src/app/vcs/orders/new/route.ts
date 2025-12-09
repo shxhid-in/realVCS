@@ -4,7 +4,7 @@ import { getButcherIdFromName } from '@/lib/butcherMapping';
 import { cacheOrder } from '@/lib/orderCache';
 import { queueOrder as queueOrderToQueue } from '@/lib/orderQueue';
 import { sendOrderUpdate } from '@/lib/sseConnectionManager';
-import { getFishItemFullName, isFishButcher } from '@/lib/butcherConfig';
+import { getFishItemFullName, isFishButcher, getItemTypeFromCategory, findCategoryForItem } from '@/lib/butcherConfig';
 import type { Order, OrderItem } from '@/lib/types';
 
 /**
@@ -69,22 +69,31 @@ export async function POST(request: NextRequest) {
     const orderId = `ORD-${orderNo}`; // Convert 123 -> "ORD-123"
     const orderDate = timestamp ? new Date(timestamp) : new Date();
 
-    // Convert items - convert to three-language format for fish butchers
+    // Convert items - convert to three-language format for fish items (works for both fish and mixed butchers)
     const orderItems: OrderItem[] = items.map((item: any) => {
       let displayName = item.name;
       
-      // For fish butchers, convert single English name to three-language format
-      if (isFishButcher(butcherId)) {
-        // Check if the item name already has three languages (contains ' - ')
-        if (item.name.includes(' - ') && item.name.split(' - ').length >= 3) {
-          // Already has three-language format, use as is
-          displayName = item.name;
+      // Check if the item name already has three languages (contains ' - ')
+      const hasThreeLanguages = item.name.includes(' - ') && item.name.split(' - ').length >= 3;
+      
+      if (!hasThreeLanguages) {
+        // Try to determine if this is a fish item by finding its category
+        const category = findCategoryForItem(butcherId, item.name);
+        if (category) {
+          const itemType = getItemTypeFromCategory(category);
+          // If it's a fish item, convert to three-language format
+          if (itemType === 'fish') {
+            displayName = getFishItemFullName(item.name);
+          }
+          // For meat items, keep the single name as is
         } else {
-          // Only has English name, convert to three-language name
-          displayName = getFishItemFullName(item.name);
+          // Fallback: For pure fish butchers, try to convert (backward compatibility)
+          if (isFishButcher(butcherId)) {
+            displayName = getFishItemFullName(item.name);
+          }
         }
       }
-      // For meat butchers, keep the single name as is
+      // If already has three-language format, use as is
       
       return {
       id: item.itemId, // "57788-1"

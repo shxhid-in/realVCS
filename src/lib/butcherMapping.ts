@@ -41,6 +41,10 @@ const BUTCHER_MAPPING: Record<string, ButcherMapping> = {
   'Test Fish Butcher': {
     butcherId: 'test_fish',
     sheetTab: 'Test_Fish_Butcher'
+  },
+  'Tender Chops': {
+    butcherId: 'tender_chops',
+    sheetTab: 'Tender_Chops'
   }
 };
 

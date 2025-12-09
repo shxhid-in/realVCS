@@ -416,7 +416,8 @@ export function findCategoryForItem(butcherId: string, itemName: string): string
   
   // Search through all categories assigned to this butcher
   for (const categoryId of config.categories) {
-    const category = CATEGORIES[categoryId as keyof typeof CATEGORIES];
+    // Find category by matching id property (not by key, since keys are camelCase but ids are kebab-case)
+    const category = Object.values(CATEGORIES).find(cat => cat.id === categoryId);
     if (!category) continue;
     
     // Check if any item in this category matches

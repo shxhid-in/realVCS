@@ -105,7 +105,6 @@ export function addConnection(
   }
   userConnections.get(userId)!.add(connection);
 
-  console.log(`[SSE] Connected: butcher=${butcherId}, user=${userId}`);
   
   return true;
 }
@@ -121,7 +120,6 @@ export function removeConnection(butcherId: string, userId: string, controller: 
     for (const conn of butcherConnSet) {
       if (conn.controller === controller && conn.userId === userId) {
         butcherConnSet.delete(conn);
-        console.log(`[SSE] Removed: butcher=${butcherId}, user=${userId}`);
         break;
       }
     }

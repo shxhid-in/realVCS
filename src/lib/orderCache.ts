@@ -18,11 +18,13 @@ export function cacheOrder(butcherId: string, order: Order): void {
   
   const butcherCache = orderCache.get(butcherId)!;
   
-  // Extract order number from order ID (ORD-123 -> 123)
+  // Extract order number from order ID (ORD-123 -> 123, ORD-1765225237192 -> 1765225237192)
   const orderNo = extractOrderNumber(order.id);
   
   if (orderNo) {
     butcherCache.set(orderNo, order);
+  } else {
+    console.error(`[OrderCache] Failed to extract order number from order ID: ${order.id}`);
   }
 }
 
