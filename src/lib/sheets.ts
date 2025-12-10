@@ -1290,7 +1290,7 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
         const sheets = await getButcherSheetsClient(butcherId);
         const butcherConfig = getButcherConfig(butcherId);
         const tabName = butcherConfig?.orderSheetTab;
-
+        
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
@@ -1298,7 +1298,7 @@ export const saveOrderToSheet = async (order: Order, butcherId: string) => {
         // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
-
+        
         // Order Date: Always use today's date in IST
         const orderDate = getISTDate();
         
@@ -1366,7 +1366,7 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
         const sheets = await getButcherSheetsClient(butcherId);
         const butcherConfig = getButcherConfig(butcherId);
         const tabName = butcherConfig?.orderSheetTab;
-
+        
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
@@ -1374,7 +1374,7 @@ export const saveOrderToSheetAfterAccept = async (order: Order, butcherId: strin
         // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
-
+        
         // Order Date: Always use today's date in IST
         const orderDate = getISTDate();
 
@@ -1472,7 +1472,7 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         const sheets = await getButcherSheetsClient(butcherId);
         const butcherConfig = getButcherConfig(butcherId);
         const tabName = butcherConfig?.orderSheetTab;
-
+        
         if (!tabName) {
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
@@ -1480,7 +1480,7 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         // Extract order number from order ID (ORD-2024-01-15-123 -> 123, ORD-143 -> 143)
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
-
+        
         // Order Date: Always use today's date in IST
         const orderDate = getISTDate();
         

@@ -11,10 +11,10 @@ import { Badge } from "../ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
 import { useToast } from "../../hooks/use-toast"
 import { 
-  getDefaultButcherRates,
-  getButcherCategories,
-  validateRate,
-  formatRate,
+  getDefaultButcherRates, 
+  getButcherCategories, 
+  validateRate, 
+  formatRate, 
   parseRate
 } from "../../lib/butcherConfig"
 import type { ButcherRates, CommissionRate, MarkupRate } from "../../lib/types"

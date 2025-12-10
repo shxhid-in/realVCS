@@ -295,6 +295,10 @@ const WeightDialog = ({
     // If unit is 'nos', force unit to 'nos', otherwise use dialogState.unit (kg)
     const displayUnit = isNosUnit ? 'nos' : (dialogState.unit || 'kg');
 
+    // Maximum limits: 10.0 kg for weight, 20 nos for quantity
+    const MAX_WEIGHT_KG = 10.0;
+    const MAX_QUANTITY_NOS = 20;
+
     const handleWeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
         
@@ -325,22 +329,36 @@ const WeightDialog = ({
         }
     };
 
-    const validateWeight = (): boolean => {
+    const validateWeight = (): { isValid: boolean; errorMessage: string | null } => {
         const weight = dialogState.weights[currentItem.name];
         if (!weight || weight.trim() === '') {
-            return false;
+            return { isValid: false, errorMessage: null };
         }
         
         if (displayUnit === 'nos') {
-            // Must be whole number >= 1
+            // Must be whole number >= 1 and <= 20
             const num = parseInt(weight);
-            return !isNaN(num) && num >= 1 && num % 1 === 0;
+            if (isNaN(num) || num < 1 || num % 1 !== 0) {
+                return { isValid: false, errorMessage: null };
+            }
+            if (num > MAX_QUANTITY_NOS) {
+                return { isValid: false, errorMessage: 'Enter a valid weight' };
+            }
+            return { isValid: true, errorMessage: null };
         } else {
-            // Must be positive number (rational or whole)
+            // Must be positive number (rational or whole) and <= 10.0
             const num = parseFloat(weight);
-            return !isNaN(num) && num > 0;
+            if (isNaN(num) || num <= 0) {
+                return { isValid: false, errorMessage: null };
+            }
+            if (num > MAX_WEIGHT_KG) {
+                return { isValid: false, errorMessage: 'Enter a valid weight' };
+            }
+            return { isValid: true, errorMessage: null };
         }
     };
+
+    const validation = validateWeight();
 
     return (
         <Dialog open={dialogState.isOpen} onOpenChange={(open) => updateDialogState({ isOpen: open })}>
@@ -370,13 +388,22 @@ const WeightDialog = ({
                             placeholder={displayUnit === 'nos' ? 'Enter quantity (whole number)' : 'Enter weight (e.g., 1.5 or 2)'}
                             value={dialogState.weights[currentItem.name] || ''}
                             onChange={handleWeightChange}
-                            className="mt-2"
+                            className={cn(
+                                "mt-2",
+                                validation.errorMessage && "border-red-500 focus-visible:ring-red-500"
+                            )}
                         />
-                        <p className="text-xs text-gray-500 mt-1">
-                            {displayUnit === 'nos' 
-                                ? 'Enter whole number only (e.g., 1, 2, 10)' 
-                                : 'Enter weight in kilograms (e.g., 1.5, 2, 0.75)'}
-                        </p>
+                        {validation.errorMessage ? (
+                            <p className="text-xs text-red-500 mt-1 font-medium">
+                                {validation.errorMessage}
+                            </p>
+                        ) : (
+                            <p className="text-xs text-gray-500 mt-1">
+                                {displayUnit === 'nos' 
+                                    ? `Enter quantity` 
+                                    : `Enter weight in kilograms`}
+                            </p>
+                        )}
                     </div>
                     {!isNosUnit && (
                     <div>
@@ -418,7 +445,7 @@ const WeightDialog = ({
                             // If dialog is shown, weight is ALWAYS required
                             const needsWeight = needsWeightDialog(currentItem.name) || !isMeatButcher(butcherId);
                             if (needsWeight) {
-                                return !validateWeight();
+                                return !validation.isValid;
                             }
                             // This should never happen since dialog only shows for items that need weight
                             return true;

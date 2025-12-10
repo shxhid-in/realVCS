@@ -378,7 +378,7 @@ export default function MenuManagementPage() {
               return; // Use saved data, don't load from config
             }
             // If we reach here, filtered menu is empty and we should load from config
-          } else {
+        } else {
             setMenu(uniqueMenu);
             return; // Use saved data, don't load from config
           }
@@ -430,7 +430,7 @@ export default function MenuManagementPage() {
       setMenu([]);
     });
   }, [butcher?.id, refreshButcherData, activeTab]);
-  
+
   // Save menu to sessionStorage whenever it changes (for persistence across refresh)
   useEffect(() => {
     if (!butcher || menu.length === 0 || typeof window === 'undefined') {
@@ -495,7 +495,7 @@ export default function MenuManagementPage() {
   // For mixed butchers: menu state is already filtered by tab, but add safety check
   // For meat/fish butchers: show all categories (but still use tabs for consistency)
   const baseVisibleMenu = menu.filter(cat => {
-    // Base visibility rules (hide Mutton for 'usaj')
+  // Base visibility rules (hide Mutton for 'usaj')
     if (butcher.id === 'usaj' && cat.name.toLowerCase() === 'mutton') {
       return false;
     }
@@ -670,7 +670,7 @@ export default function MenuManagementPage() {
       let finalMenu: MenuCategory[];
       if (isMixed) {
         finalMenu = mergedMenu;
-        setMenu(mergedMenu);
+      setMenu(mergedMenu);
       } else {
         finalMenu = (() => {
           const updatedMenu = [...menu];
