@@ -824,7 +824,7 @@ export default function MenuManagementPage() {
         
         setIsDataFromSheet(false); // Reset to mock data
         toast({
-          title: "Reset to Mock Data",
+          title: "Reset to default",
           description: isMixed ? `Menu reset for ${activeTab === 'meat' ? 'Meat' : 'Fish'} tab.` : "Menu reset to mock data.",
         });
       }
@@ -832,7 +832,7 @@ export default function MenuManagementPage() {
       toast({
         variant: "destructive",
         title: "Reset Failed",
-        description: "Could not reset to mock data.",
+        description: "Could not reset to default.",
       });
     } finally {
       setIsLoading(false);
@@ -862,7 +862,7 @@ export default function MenuManagementPage() {
             className="flex items-center gap-2"
           >
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Loader2 className="h-4 w-4" />}
-            Load from Sheet
+            Load Previous Menu
           </Button>
           <Button 
             variant="outline" 
