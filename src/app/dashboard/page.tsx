@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getFishItemFullName, freshButchers, getButcherType, isFishButcher, getCommissionRate } from '../../lib/butcherConfig';
+import { getFishItemFullName, freshButchers, getButcherType, isFishButcher, getCommissionRate, findCategoryForItem, getItemTypeFromCategory } from '../../lib/butcherConfig';
 import { getRatesFromSheet } from '../../lib/sheets';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,34 @@ function needsWeightDialog(itemName: string): boolean {
            itemNameLower.includes('chicken thigh') ||
            itemNameLower.includes('nadan') ||
            itemNameLower.includes('thigh');
+}
+
+// Helper function to check if an item needs weight entry
+// For meat items: skip weight (except chicken nadan/thigh)
+// For fish items: always require weight
+function itemNeedsWeight(butcherId: string, itemName: string): boolean {
+    // First check if it's a special case that always needs weight (chicken nadan/thigh)
+    if (needsWeightDialog(itemName)) {
+        return true;
+    }
+    
+    // Check if item is a meat item by finding its category
+    const category = findCategoryForItem(butcherId, itemName);
+    if (category) {
+        const itemType = getItemTypeFromCategory(category);
+        // If it's a meat item, it doesn't need weight (exception already handled above)
+        if (itemType === 'meat') {
+            return false;
+        }
+        // If it's a fish item, it needs weight
+        if (itemType === 'fish') {
+            return true;
+        }
+    }
+    
+    // Fallback: for pure meat butchers, don't require weight
+    // For fish/mixed butchers, require weight if category not found
+    return !isMeatButcher(butcherId);
 }
 
 // Helper function to get the correct weight to display
@@ -259,7 +287,7 @@ const ItemAcceptDialog = ({
                     >
                         {(() => {
                             // Check if this is the last item that doesn't need weight
-                            const remainingItems = order.items.slice(dialogState.currentIndex + 1).filter(item => !needsWeightDialog(item.name));
+                            const remainingItems = order.items.slice(dialogState.currentIndex + 1).filter(item => !itemNeedsWeight(butcherId, item.name));
                             return remainingItems.length > 0 ? 'Next Item' : 'Complete';
                         })()}
                     </Button>
@@ -443,7 +471,7 @@ const WeightDialog = ({
                         onClick={handleWeightSubmit}
                         disabled={(() => {
                             // If dialog is shown, weight is ALWAYS required
-                            const needsWeight = needsWeightDialog(currentItem.name) || !isMeatButcher(butcherId);
+                            const needsWeight = itemNeedsWeight(butcherId, currentItem.name);
                             if (needsWeight) {
                                 return !validation.isValid;
                             }
@@ -454,7 +482,7 @@ const WeightDialog = ({
                         {(() => {
                             // Check if this is the last item that needs weight
                             if (isMeatButcher(butcherId)) {
-                                const remainingNeedsWeight = order.items.slice(dialogState.currentIndex + 1).some(item => needsWeightDialog(item.name));
+                                const remainingNeedsWeight = order.items.slice(dialogState.currentIndex + 1).some(item => itemNeedsWeight(butcherId, item.name));
                                 return remainingNeedsWeight ? 'Next Item' : 'Complete';
                             }
                             return dialogState.currentIndex === order.items.length - 1 ? 'Complete' : 'Next Item';
@@ -659,58 +687,45 @@ const OrderCard = ({
     };
 
     const handleAccept = () => {
-        if (isMeatButcher(butcherId)) {
-            // Check if any items need weight dialog (chicken nadan, chicken thigh)
-            const needsWeightItems = order.items.filter(item => needsWeightDialog(item.name));
-            const noWeightItems = order.items.filter(item => !needsWeightDialog(item.name));
-            
-            if (needsWeightItems.length > 0 && noWeightItems.length > 0) {
-                // Mixed: items that need weight AND items that don't need weight
-                // Start with items that don't need weight first
-                const firstNoWeightIndex = order.items.findIndex(item => !needsWeightDialog(item.name));
-                setCurrentDialogOrder(order);
-                updateDialogState({
-                    itemAcceptDialog: { isOpen: true, currentIndex: firstNoWeightIndex },
-                    weights: {},
-                    rejectedItems: {},
-                    unit: 'kg',
-                    currentIndex: 0, // This will be used for weight dialog later
-                    isOpen: false // Weight dialog closed initially
-                });
-            } else if (needsWeightItems.length > 0) {
-                // Only items that need weight - open weight dialog
-                const firstNeedsWeightIndex = order.items.findIndex(item => needsWeightDialog(item.name));
-                setCurrentDialogOrder(order);
-                updateDialogState({
-                    isOpen: true,
-                    weights: {},
-                    rejectedItems: {},
-                    unit: 'kg',
-                    currentIndex: firstNeedsWeightIndex >= 0 ? firstNeedsWeightIndex : 0,
-                    itemAcceptDialog: { isOpen: false, currentIndex: 0 }
-                });
-            } else {
-                // Only items that don't need weight - open item accept dialog
-                setCurrentDialogOrder(order);
-                updateDialogState({
-                    itemAcceptDialog: { isOpen: true, currentIndex: 0 },
-                    weights: {},
-                    rejectedItems: {},
-                    unit: 'kg',
-                    currentIndex: 0,
-                    isOpen: false
-                });
-            }
-        } else {
-            // Fish butchers: Need to enter preparation weight for all items
+        // Check which items need weight (meat items skip, except chicken nadan/thigh; fish items always need weight)
+        const needsWeightItems = order.items.filter(item => itemNeedsWeight(butcherId, item.name));
+        const noWeightItems = order.items.filter(item => !itemNeedsWeight(butcherId, item.name));
+        
+        if (needsWeightItems.length > 0 && noWeightItems.length > 0) {
+            // Mixed: items that need weight AND items that don't need weight
+            // Start with items that don't need weight first
+            const firstNoWeightIndex = order.items.findIndex(item => !itemNeedsWeight(butcherId, item.name));
+            setCurrentDialogOrder(order);
+            updateDialogState({
+                itemAcceptDialog: { isOpen: true, currentIndex: firstNoWeightIndex },
+                weights: {},
+                rejectedItems: {},
+                unit: 'kg',
+                currentIndex: 0, // This will be used for weight dialog later
+                isOpen: false // Weight dialog closed initially
+            });
+        } else if (needsWeightItems.length > 0) {
+            // Only items that need weight - open weight dialog
+            const firstNeedsWeightIndex = order.items.findIndex(item => itemNeedsWeight(butcherId, item.name));
             setCurrentDialogOrder(order);
             updateDialogState({
                 isOpen: true,
                 weights: {},
                 rejectedItems: {},
-                unit: 'kg', // Fish butchers use kg
-                currentIndex: 0,
+                unit: 'kg',
+                currentIndex: firstNeedsWeightIndex >= 0 ? firstNeedsWeightIndex : 0,
                 itemAcceptDialog: { isOpen: false, currentIndex: 0 }
+            });
+        } else {
+            // Only items that don't need weight - open item accept dialog
+            setCurrentDialogOrder(order);
+            updateDialogState({
+                itemAcceptDialog: { isOpen: true, currentIndex: 0 },
+                weights: {},
+                rejectedItems: {},
+                unit: 'kg',
+                currentIndex: 0,
+                isOpen: false
             });
         }
     };
@@ -720,7 +735,7 @@ const OrderCard = ({
         let nextIndex = dialogState.itemAcceptDialog?.currentIndex + 1 || 0;
         
         // Find next item that doesn't need weight
-        while (nextIndex < order.items.length && needsWeightDialog(order.items[nextIndex].name)) {
+        while (nextIndex < order.items.length && itemNeedsWeight(butcherId, order.items[nextIndex].name)) {
             nextIndex++;
         }
         
@@ -735,11 +750,11 @@ const OrderCard = ({
         } else {
             // All items that don't need weight are processed
             // Check if there are items that need weight
-            const needsWeightItems = order.items.filter(item => needsWeightDialog(item.name));
+            const needsWeightItems = order.items.filter(item => itemNeedsWeight(butcherId, item.name));
             
             if (needsWeightItems.length > 0) {
                 // Transition to weight dialog
-                const firstNeedsWeightIndex = order.items.findIndex(item => needsWeightDialog(item.name));
+                const firstNeedsWeightIndex = order.items.findIndex(item => itemNeedsWeight(butcherId, item.name));
                 updateDialogState({
                     itemAcceptDialog: { isOpen: false, currentIndex: 0 },
                     isOpen: true,
@@ -799,7 +814,7 @@ const OrderCard = ({
         if (isInItemAcceptDialog) {
             // In item accept dialog - find next item that doesn't need weight
             nextIndex = (dialogState.itemAcceptDialog?.currentIndex || 0) + 1;
-            while (nextIndex < order.items.length && needsWeightDialog(order.items[nextIndex].name)) {
+            while (nextIndex < order.items.length && itemNeedsWeight(butcherId, order.items[nextIndex].name)) {
                 nextIndex++;
             }
             
@@ -812,9 +827,9 @@ const OrderCard = ({
                 });
             } else {
                 // All items that don't need weight processed, check for weight items
-                const needsWeightItems = order.items.filter(item => needsWeightDialog(item.name));
+                const needsWeightItems = order.items.filter(item => itemNeedsWeight(butcherId, item.name));
                 if (needsWeightItems.length > 0) {
-                    const firstNeedsWeightIndex = order.items.findIndex(item => needsWeightDialog(item.name));
+                    const firstNeedsWeightIndex = order.items.findIndex(item => itemNeedsWeight(butcherId, item.name));
                     updateDialogState({
                         itemAcceptDialog: { isOpen: false, currentIndex: 0 },
                         isOpen: true,
@@ -831,10 +846,8 @@ const OrderCard = ({
         } else {
             // In weight dialog - find next item that needs weight
             nextIndex = dialogState.currentIndex + 1;
-            if (isMeatButcher(butcherId)) {
-                while (nextIndex < order.items.length && !needsWeightDialog(order.items[nextIndex].name)) {
-                    nextIndex++;
-                }
+            while (nextIndex < order.items.length && !itemNeedsWeight(butcherId, order.items[nextIndex].name)) {
+                nextIndex++;
             }
             
             if (nextIndex < order.items.length) {
@@ -855,7 +868,7 @@ const OrderCard = ({
         }
 
         // Check if item needs weight (always required when dialog is shown)
-        const needsWeight = needsWeightDialog(currentItem.name) || !isMeatButcher(butcherId);
+        const needsWeight = itemNeedsWeight(butcherId, currentItem.name);
         
         if (needsWeight) {
         const weight = dialogState.weights[currentItem.name];
@@ -897,11 +910,9 @@ const OrderCard = ({
         // Find next item that needs weight, or move to next item
         let nextIndex = dialogState.currentIndex + 1;
         
-        if (isMeatButcher(butcherId)) {
-            // For meat butchers, skip to next item that needs weight
-            while (nextIndex < order.items.length && !needsWeightDialog(order.items[nextIndex].name)) {
-                nextIndex++;
-            }
+        // Skip to next item that needs weight (works for all butcher types)
+        while (nextIndex < order.items.length && !itemNeedsWeight(butcherId, order.items[nextIndex].name)) {
+            nextIndex++;
         }
         
         if (nextIndex < order.items.length) {
@@ -939,7 +950,7 @@ const OrderCard = ({
             // ✅ FIX: Include preparing weight on item for immediate display
             const weight = currentDialogState.weights[item.name];
             const unit = currentDialogState.unit || (item.unit === 'nos' ? 'nos' : 'kg');
-            const needsWeight = needsWeightDialog(item.name) || !isMeatButcher(butcherId);
+            const needsWeight = itemNeedsWeight(butcherId, item.name);
             
             if (needsWeight && weight) {
                 return {
@@ -965,7 +976,7 @@ const OrderCard = ({
             if (!rejected) {
                 const weight = currentDialogState.weights[item.name];
                 const unit = currentDialogState.unit || (item.unit === 'nos' ? 'nos' : 'kg');
-                const needsWeight = needsWeightDialog(item.name) || !isMeatButcher(butcherId);
+                const needsWeight = itemNeedsWeight(butcherId, item.name);
                 
                 if (needsWeight && weight) {
                     const weightStr = `${weight}${unit}`;
@@ -1048,7 +1059,7 @@ const OrderCard = ({
                     // ✅ FIX: Read from current state
                     const weight = currentDialogState.weights[item.name];
                     const unit = currentDialogState.unit || (item.unit === 'nos' ? 'nos' : 'kg');
-                    const needsWeight = needsWeightDialog(item.name) || !isMeatButcher(butcherId);
+                    const needsWeight = itemNeedsWeight(butcherId, item.name);
                     
                     if (needsWeight && weight) {
                         // Item needs weight and weight was entered

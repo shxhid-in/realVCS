@@ -347,17 +347,17 @@ export const BUTCHER_CONFIGS: Record<string, ButcherConfig> = {
     type: 'mixed',
     categories: ['chicken', 'mutton', 'beef', 'sea-water-fish', 'fresh-water-fish', 'steak-fish'],
     commissionRates: {
-      'Chicken': 0.10,
+      'Chicken': 0.8,
       'Mutton': 0.08,
-      'Beef': 0.10,
-      'Sea Water Fish': 0.07,
-      'Fresh Water Fish': 0.07,
-      'Steak Fish': 0.07
+      'Beef': 0.8,
+      'Sea Water Fish': 0.08,
+      'Fresh Water Fish': 0.08,
+      'Steak Fish': 0.08
     },
     markupRates: {
       'Chicken': 0.05,
-      'Mutton': 0.00,
-      'Beef': 0.00,
+      'Mutton': 0.05,
+      'Beef': 0.05,
       'Sea Water Fish': 0.05,
       'Fresh Water Fish': 0.05,
       'Steak Fish': 0.05
