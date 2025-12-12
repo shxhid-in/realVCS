@@ -41,7 +41,11 @@ export const CATEGORIES = {
       createUnavailableItem('c1i6', 'chicken lollipop', 'kg', defaultSize()),
       createUnavailableItem('c1i7', 'chicken parts', 'kg', defaultSize()),
       createUnavailableItem('c1i8', 'chicken nadan', 'kg', defaultSize()),
+      createUnavailableItem('c1i9', 'chicken gizzard', 'kg', defaultSize()),
       createUnavailableItem('c1i9', 'chicken thigh', 'kg', defaultSize()),
+      createUnavailableItem('c1i10', 'chicken wings', 'kg', defaultSize()),
+      createUnavailableItem('cli11', 'chicken drumstick', 'kg', defaultSize()),
+      createUnavailableItem('c1i12', 'chicken liver/heart', 'kg', defaultSize()),
     ]
   },
   
@@ -57,6 +61,7 @@ export const CATEGORIES = {
       createUnavailableItem('m1i6', 'mutton head', 'kg', defaultSize()),
       createUnavailableItem('m1i7', 'mutton botty', 'kg', defaultSize()),
       createUnavailableItem('m1i8', 'mutton paaya', 'kg', defaultSize()),
+      createUnavailableItem('m1i9', 'mutton carcass', 'kg', defaultSize()),
     ]
   },
   
@@ -64,8 +69,9 @@ export const CATEGORIES = {
     id: 'beef',
     name: 'Beef',
     items: [
-      createUnavailableItem('b1i1', 'beef meat', 'kg', defaultSize()),
-      createUnavailableItem('b1i2', 'beef liver', 'kg', defaultSize()),
+      createUnavailableItem('b1i1', 'beef boneless', 'kg', defaultSize()),
+      createUnavailableItem('b1i2', 'beef bone', 'kg', defaultSize()),
+      createUnavailableItem('b1i3', 'beef liver', 'kg', defaultSize()),
     ]
   },
   
@@ -101,7 +107,6 @@ export const CATEGORIES = {
       createUnavailableItem('i-vellachoora', 'Vella Choora - White Tuna - വെള്ള ചൂര', 'kg', fishSizes()),
       createUnavailableItem('i-kazhanthanchemmeen', 'Kazhadhan Chemeen - Kazhadhan Prawns - കഴന്തൻ ചെമ്മീൻ', 'kg', fishSizes()),
       createUnavailableItem('i-nandu', 'Nandu - Crab - നണ്ട്', 'kg', fishSizes()),
-      createUnavailableItem('i-eari', 'Eari - Emperor - ഏരി', 'kg', fishSizes()),
       createUnavailableItem('i-kakka', 'Kakka - Clam - കക്ക', 'kg', fishSizes()),
       createUnavailableItem('i-kalanji', 'Kalanji - Sea Bass - കാളാഞ്ചി', 'kg', fishSizes()),
       createUnavailableItem('i-poomeen-sea', 'Poomeen - Milk Fish - പൂമീൻ', 'kg', fishSizes()),
@@ -113,7 +118,6 @@ export const CATEGORIES = {
       createUnavailableItem('i-velladavu', 'Velladavu - Silver Belly - വെള്ളടവ്', 'kg', fishSizes()),
       createUnavailableItem('i-sheelavu-sea', 'Sheelavu - Baraccuda - ശീലാവ്', 'kg', fishSizes()),
       createUnavailableItem('i-kolaan', 'Kolaan - Gar Fish - കോലാൻ', 'kg', fishSizes()),
-      createUnavailableItem('i-kozhuva', 'Kozhuva - Anchovy - കൊഴുവ ', 'kg', fishSizes()),
       createUnavailableItem('i-chalamathi', 'Chala Mathi - Chala Sardine - ചാള മത്തി', 'kg', fishSizes()),
       createUnavailableItem('i-aayirampalli', 'Aayiram Palli - Halibut - ആയിരംപല്ലി', 'kg', fishSizes()),
       createUnavailableItem('i-thalayan', 'Thalayan - Ruben - തളയൻ', 'kg', fishSizes()),
