@@ -42,6 +42,7 @@ export const CATEGORIES = {
       createUnavailableItem('c1i7', 'chicken parts', 'kg', defaultSize()),
       createUnavailableItem('c1i8', 'chicken nadan', 'kg', defaultSize()),
       createUnavailableItem('c1i9', 'chicken gizzard', 'kg', defaultSize()),
+      createUnavailableItem('cli9', 'chicken soup bone', 'kg', defaultSize()),
       createUnavailableItem('c1i9', 'chicken thigh', 'kg', defaultSize()),
       createUnavailableItem('c1i10', 'chicken wings', 'kg', defaultSize()),
       createUnavailableItem('cli11', 'chicken drumstick', 'kg', defaultSize()),
@@ -348,8 +349,8 @@ export const BUTCHER_CONFIGS: Record<string, ButcherConfig> = {
     categories: ['chicken', 'mutton', 'beef', 'sea-water-fish', 'fresh-water-fish', 'steak-fish'],
     commissionRates: {
       'Chicken': 0.08,
-      'Mutton': 0.08,
-      'Beef': 0.08,
+      'Mutton': 0.00,
+      'Beef': 0.00,
       'Sea Water Fish': 0.08,
       'Fresh Water Fish': 0.08,
       'Steak Fish': 0.08
