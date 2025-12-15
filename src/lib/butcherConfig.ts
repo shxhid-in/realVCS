@@ -42,11 +42,11 @@ export const CATEGORIES = {
       createUnavailableItem('c1i7', 'chicken parts', 'kg', defaultSize()),
       createUnavailableItem('c1i8', 'chicken nadan', 'kg', defaultSize()),
       createUnavailableItem('c1i9', 'chicken gizzard', 'kg', defaultSize()),
-      createUnavailableItem('cli9', 'chicken soup bone', 'kg', defaultSize()),
-      createUnavailableItem('c1i9', 'chicken thigh', 'kg', defaultSize()),
-      createUnavailableItem('c1i10', 'chicken wings', 'kg', defaultSize()),
-      createUnavailableItem('cli11', 'chicken drumstick', 'kg', defaultSize()),
-      createUnavailableItem('c1i12', 'chicken liver/heart', 'kg', defaultSize()),
+      createUnavailableItem('cli10', 'chicken soup bone', 'kg', defaultSize()),
+      createUnavailableItem('c1i11', 'chicken thigh', 'kg', defaultSize()),
+      createUnavailableItem('c1i12', 'chicken wings', 'kg', defaultSize()),
+      createUnavailableItem('cli13', 'chicken drumstick', 'kg', defaultSize()),
+      createUnavailableItem('c1i14', 'chicken liver/heart', 'kg', defaultSize()),
     ]
   },
   
