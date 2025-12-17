@@ -47,6 +47,7 @@ export const CATEGORIES = {
       createUnavailableItem('c1i12', 'chicken wings', 'kg', defaultSize()),
       createUnavailableItem('cli13', 'chicken drumstick', 'kg', defaultSize()),
       createUnavailableItem('c1i14', 'chicken liver/heart', 'kg', defaultSize()),
+      createUnavailableItem('c1i15', 'chicken with skin', 'kg', defaultSize()),
     ]
   },
   
