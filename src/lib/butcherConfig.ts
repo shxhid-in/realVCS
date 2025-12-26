@@ -98,7 +98,6 @@ export const CATEGORIES = {
       createUnavailableItem('i-eari', 'Eari - Emperor - എരി', 'kg', fishSizes()),
       createUnavailableItem('i-blackaavoli', 'Black Aavoli - Black Pomfret - ആവോലി', 'kg', fishSizes()),
       createUnavailableItem('i-vellaaavoli', 'Vella Aavoli - White Pomfret - വെള്ള ആവോലി', 'kg', fishSizes()),
-      createUnavailableItem('i-silveraavoli', 'Silver Aavoli - Silver Pomfret - സിൽവർ ആവോലി', 'kg', fishSizes()),
       createUnavailableItem('i-kera', 'Kera - Kera - കേര', 'kg', fishSizes()),
       createUnavailableItem('i-sravu-sea', 'Sravu - Shark - സ്രാവ്', 'kg', fishSizes()),
       createUnavailableItem('i-vatta-sea', 'Vatta - Trevally - വറ്റ', 'kg', fishSizes()),
@@ -143,6 +142,7 @@ export const CATEGORIES = {
       createUnavailableItem('i-damaavoli', 'Dam Aavoli - Dam Pomfret - ഡാം ആവോലി', 'kg', fishSizes()),
       createUnavailableItem('i-kadalkannan', 'Murrel - Kadal Kannan - കടൽ കണ്ണൻ', 'kg', fishSizes()),
       createUnavailableItem('i-varal', 'Varal - Snake Head - വരാൽ', 'kg', fishSizes()),
+      createUnavailableItem('i-silveraavoli', 'Silver Aavoli - Silver Pomfret - സിൽവർ ആവോലി', 'kg', fishSizes()),
       createUnavailableItem('i-attuvaala', 'Aattu Vaala - Boal - ആറ്റു വാള', 'kg', fishSizes()),
     ]
   },
