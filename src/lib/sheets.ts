@@ -570,33 +570,16 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
             } else {
                 // Fish butchers: Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , size, purchasePrice] = row;
-                console.log(`Fish butcher row parsing:`, { 
-                    itemName, 
-                    size,
-                    purchasePrice, 
-                    fullRow: row,
-                    column3: row[2], // Size
-                    column4: row[3], // Purchase Price
-                    column5: row[4]  // Selling Price
-                });
+                // Fish butcher row parsing
             }
             
-            console.log(`Processing sheet row:`, { itemName, size, purchasePrice, row, isMeatButcher });
+            // Processing sheet row
             if (itemName && purchasePrice) {
                 // Match item names (case sensitive for exact matching)
                 const baseItemName = itemName.trim(); // Keep original case for exact matching
                 const price = parseFloat(purchasePrice) || 0; // Default fallback
                 
-                console.log('Checking menu item:', { 
-                    itemName, 
-                    size,
-                    baseItemName, 
-                    purchasePrice, 
-                    price,
-                    butcherId,
-                    itemNames,
-                    row
-                });
+                // Checking menu item
                 
                 // Check if any of the order items match this menu item
                 for (const orderItemName of itemNames) {
@@ -636,7 +619,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                             
                             if (itemWithParentheses.toLowerCase() === orderWithParentheses.toLowerCase()) {
                                 isMatch = true;
-                                console.log(`✅ Fish butcher parentheses size match: "${itemWithParentheses}" = "${orderWithParentheses}"`);
+                                // Fish butcher parentheses size match
                             }
                             
                             // Try format: "Trevally Small" - space format
@@ -646,7 +629,7 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                                 
                                 if (itemWithSize.toLowerCase() === orderWithSize.toLowerCase()) {
                                     isMatch = true;
-                                    console.log(`✅ Fish butcher space size match: "${itemWithSize}" = "${orderWithSize}"`);
+                                    // Fish butcher space size match
                                 }
                             }
                         }
@@ -657,12 +640,12 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                             if (size && size !== 'default' && orderItemSize && orderItemSize !== 'default') {
                                 if (size.toLowerCase() === orderItemSize.toLowerCase()) {
                                     isMatch = true;
-                                    console.log(`✅ Fish butcher English name with size match: "${baseItemName}" + "${size}"`);
+                                    // Fish butcher English name with size match
                                 }
                             } else if (!size || size === 'default' || !orderItemSize || orderItemSize === 'default') {
                                 // If either doesn't have size, match by name only (case-insensitive)
                                 isMatch = true;
-                                console.log(`✅ Fish butcher English name match (case-insensitive): "${baseItemName}"`);
+                                // Fish butcher English name match
                             }
                         }
                         
@@ -675,11 +658,11 @@ export const getItemPurchasePricesFromSheet = async (butcherId: string, itemName
                             if (size && size !== 'default' && orderItemSize && orderItemSize !== 'default') {
                                 if (size.toLowerCase() === orderItemSize) {
                             isMatch = true;
-                                    console.log(`✅ Fish butcher original name with size match: "${baseItemName}" + "${size}"`);
+                                    // Fish butcher original name with size match
                                 }
                             } else if (!size || size === 'default' || !orderItemSize || orderItemSize === 'default') {
                                 isMatch = true;
-                                console.log(`✅ Fish butcher original name match: "${baseItemName}"`);
+                                // Fish butcher original name match
                             }
                         }
                         // If meat category item, try original name with "meat" suffix (case-insensitive)
@@ -1070,14 +1053,14 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     const completionMinutes = parseFloat(completionTime.replace(/[^\d.]/g, ''));
                     if (!isNaN(completionMinutes)) {
                         prepEndTime = new Date(prepStartTime.getTime() + (completionMinutes * 60 * 1000));
-                        console.log(`Order ${orderNo}: Using completion time from sheet: ${completionTime} -> ${completionMinutes} minutes -> end time: ${prepEndTime}`);
+                        // Order completion time parsed from sheet
                     } else {
                         prepEndTime = new Date(); // Fallback to current time
-                        console.log(`Order ${orderNo}: Invalid completion time format: "${completionTime}", using current time`);
+                        // Invalid completion time format, using current time
                     }
                 } else {
                     prepEndTime = new Date(); // Fallback to current time
-                    console.log(`Order ${orderNo}: No completion time in sheet, using current time`);
+                    // No completion time in sheet, using current time
                 }
                 
                 // Read actual revenue from sheet instead of calculating with default rate
@@ -1139,7 +1122,6 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                     // For rejected orders without revenue in sheet, calculate potential revenue based on quantities
                     const totalQuantity = quantities.reduce((sum, q) => sum + (parseFloat(q) || 0), 0);
                     revenue = totalQuantity * 0; // Default rate for potential revenue
-                    console.log(`Order ${orderNo}: No revenue in sheet for rejected order, calculating potential revenue: ${totalQuantity} * 0 = ${revenue}`);
                 }
             }
 
@@ -1185,7 +1167,7 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                 if (day && month && year) {
                     // Create date with proper timezone handling
                     orderTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0, 0);
-                    console.log(`Parsed date: ${orderDate} -> ${orderTime.toISOString()}`);
+                    // Date parsed from order date string
                 } else {
                     console.warn(`Invalid date format: ${orderDate}, using current date`);
                     orderTime = new Date();
@@ -1200,7 +1182,7 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
             const dateStr = orderTime.toISOString().split('T')[0]; // YYYY-MM-DD format
             const uniqueOrderId = `${dateStr}-${orderNo}`;
 
-            console.log(`Creating order: ${orderNo} for date ${orderDate} -> ID: ORD-${uniqueOrderId}`);
+            // Creating order with unique ID
 
             // Create custom weights objects for the order
             const itemQuantities: {[itemName: string]: string} = {};
@@ -1213,7 +1195,6 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                         itemQuantities[item.name] = preparingWeights[index];
                     }
                 });
-                console.log(`Meat butcher - itemQuantities:`, itemQuantities);
             } else {
                 // For fish butchers, store custom weights in itemWeights
                 itemsWithCategory.forEach((item, index) => {
@@ -1221,10 +1202,7 @@ export const getOrdersFromSheet = async (butcherId: string): Promise<Order[]> =>
                         itemWeights[item.name] = preparingWeights[index];
                     }
                 });
-                console.log(`Fish butcher - itemWeights:`, itemWeights);
-                console.log(`Fish butcher - preparingWeights from sheet:`, preparingWeights);
-                console.log(`Fish butcher - itemsWithCategory:`, itemsWithCategory.map(item => item.name));
-                console.log(`Fish butcher - itemWeights mapping:`, itemWeights ? Object.entries(itemWeights) : 'none');
+                // Fish butcher item weights processed
             }
 
             const order: Order = {

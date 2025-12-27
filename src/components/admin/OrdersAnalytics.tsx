@@ -24,7 +24,7 @@ import {
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns"
 import type { Order } from "../../lib/types"
 import { getItemPurchasePricesFromSheet } from "../../lib/sheets"
-import { freshButchers } from "../../lib/butcherConfig"
+import { freshButchers, extractEnglishName } from "../../lib/butcherConfig"
 
 interface OrdersAnalyticsProps {
   className?: string
@@ -38,6 +38,87 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [selectedButcher, setSelectedButcher] = useState<string>('all')
   const [dateRange, setDateRange] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily')
+  
+  // Helper function to get item preparing weight by matching item name
+  const getItemPreparingWeight = (order: Order, itemName: string): string => {
+    const englishName = extractEnglishName(itemName)
+    
+    // Try matching by English name first (sheet stores English names)
+    if (order.itemWeights && order.itemWeights[englishName]) {
+      return order.itemWeights[englishName]
+    }
+    if (order.itemQuantities && order.itemQuantities[englishName]) {
+      return order.itemQuantities[englishName]
+    }
+    
+    // Try to match by full name (fallback)
+    if (order.itemWeights && order.itemWeights[itemName]) {
+      return order.itemWeights[itemName]
+    }
+    if (order.itemQuantities && order.itemQuantities[itemName]) {
+      return order.itemQuantities[itemName]
+    }
+    
+    // Try matching all keys by English name (in case sheet has different format)
+    if (order.itemWeights) {
+      for (const [key, value] of Object.entries(order.itemWeights)) {
+        if (extractEnglishName(key) === englishName || key === englishName) {
+          return value
+        }
+      }
+    }
+    if (order.itemQuantities) {
+      for (const [key, value] of Object.entries(order.itemQuantities)) {
+        if (extractEnglishName(key) === englishName || key === englishName) {
+          return value
+        }
+      }
+    }
+    
+    // Fallback to item quantity
+    const item = order.items.find(i => i.name === itemName)
+    return item ? `${item.quantity}${item.unit}` : '-'
+  }
+  
+  // Helper function to get item revenue by matching item name
+  const getItemRevenue = (order: Order, itemName: string): number => {
+    if (!order.itemRevenues) return 0
+    
+    const englishName = extractEnglishName(itemName)
+    
+    // Try matching by English name first (sheet stores English names)
+    if (order.itemRevenues[englishName] !== undefined) {
+      return order.itemRevenues[englishName]
+    }
+    
+    // Try to match by full name (fallback)
+    if (order.itemRevenues[itemName] !== undefined) {
+      return order.itemRevenues[itemName]
+    }
+    
+    // Try matching all keys by English name (in case sheet has different format)
+    for (const [key, value] of Object.entries(order.itemRevenues)) {
+      if (extractEnglishName(key) === englishName || key === englishName) {
+        return value
+      }
+    }
+    
+    // Try matching with size suffix (itemName_size)
+    const item = order.items.find(i => i.name === itemName)
+    if (item && item.size) {
+      const englishKey = `${englishName}_${item.size}`
+      if (order.itemRevenues[englishKey] !== undefined) {
+        return order.itemRevenues[englishKey]
+      }
+      const itemKey = `${itemName}_${item.size}`
+      if (order.itemRevenues[itemKey] !== undefined) {
+        return order.itemRevenues[itemKey]
+      }
+    }
+    
+    return 0
+  }
+  
   const [customDateRange, setCustomDateRange] = useState<{start: string, end: string}>({
     start: format(new Date(), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
@@ -45,6 +126,18 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [itemStats, setItemStats] = useState<Record<string, { totalWeight: number; totalRevenue: number; count: number }>>({})
   const [isCalculatingItemStats, setIsCalculatingItemStats] = useState(false)
+
+  // Remove duplicate orders by order ID
+  const removeDuplicateOrders = useCallback((orders: Order[]): Order[] => {
+    const orderMap = new Map<string, Order>()
+    orders.forEach(order => {
+      // Use order ID as key, keep the first occurrence
+      if (!orderMap.has(order.id)) {
+        orderMap.set(order.id, order)
+      }
+    })
+    return Array.from(orderMap.values())
+  }, [])
 
   // Filter orders based on selected butcher and date range
   const filterOrders = useCallback(() => {
@@ -92,17 +185,10 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       return orderDateStart >= startDateStart && orderDateStart <= endDateStart
     })
     
-    // Remove duplicates based on order ID and butcher ID combination
-    const uniqueOrders = filtered.reduce((acc, order) => {
-      const uniqueKey = `${order.id}-${order.butcherId}`
-      if (!acc.has(uniqueKey)) {
-        acc.set(uniqueKey, order)
-      }
-      return acc
-    }, new Map())
+    // Remove duplicates by order ID
+    const deduplicatedOrders = removeDuplicateOrders(filtered)
     
-    // Convert back to array and sort by order time (newest first)
-    const deduplicatedOrders = Array.from(uniqueOrders.values())
+    // Sort by order time (newest first)
     deduplicatedOrders.sort((a, b) => new Date(b.orderTime).getTime() - new Date(a.orderTime).getTime())
     
     setFilteredOrders(deduplicatedOrders)
@@ -163,7 +249,7 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       `${order.id.replace('ORD-', '')}-${order.butcherId}`,
       order.butcherName || freshButchers.find(b => b.id === order.butcherId)?.name,
       order.customerName,
-      order.items.map(item => `${item.name} (${item.quantity}${item.unit})`).join('; '),
+      order.items.map(item => `${extractEnglishName(item.name)} (${item.quantity}${item.unit})`).join('; '),
       order.status,
       format(new Date(order.orderTime), 'dd/MM/yyyy HH:mm'),
       order.completionTime || '',
@@ -584,7 +670,7 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                       {index + 1}
                     </div>
                     <div>
-                      <div className="font-medium">{item.name}</div>
+                      <div className="font-medium">{extractEnglishName(item.name)}</div>
                       <div className="text-sm text-muted-foreground">
                         {item.count} order{item.count !== 1 ? 's' : ''} • {item.totalWeight.toFixed(2)} kg
                       </div>
@@ -623,222 +709,102 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
             </div>
           ) : (
             <>
-              {/* ✅ FIX: Scrollable table for all screen sizes */}
-              <div className="w-full overflow-x-auto scrollbar-hide">
-                <div className="min-w-[800px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Order ID</TableHead>
-                      <TableHead>Butcher</TableHead>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Items</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Order Time</TableHead>
-                      <TableHead>Prep Time</TableHead>
-                      <TableHead>Weight/Quantity</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Address</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredOrders.map((order, index) => (
-                      <TableRow key={`${order.id}-${order.butcherId}-${index}`} className={getOrderRowStyle(order.status)}>
-                        <TableCell className="font-medium">
-                          {order.id.replace('ORD-', '')}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {order.butcherName || freshButchers.find(b => b.id === order.butcherId)?.name}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{order.customerName}</TableCell>
-                        <TableCell>
-                          <div className="max-w-xs">
-                            {order.items.map((item, index) => (
-                              <div key={index} className="text-sm">
-                                <span className="font-medium">{item.name}</span>
-                                <span className="text-muted-foreground ml-1">
-                                  ({item.quantity}{item.unit})
-                                </span>
-                                {item.size && (
-                                  <span className="text-primary ml-1 font-medium">
-                                    - Size: {item.size}
-                                  </span>
+              {/* Scrollable table for all screen sizes - horizontal scroll on mobile, full width on desktop */}
+              <div className="w-full overflow-x-auto -mx-4 sm:-mx-6 lg:mx-0 lg:overflow-visible">
+                <div className="min-w-[800px] lg:min-w-0 lg:w-full px-4 sm:px-6 lg:px-0">
+                  <div className="border rounded-lg">
+                    <Table className="w-full">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Order ID</TableHead>
+                          <TableHead>Butcher</TableHead>
+                          <TableHead>Items</TableHead>
+                          <TableHead>Preparing Weight</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredOrders.map((order, index) => {
+                          return (
+                            <TableRow key={`${order.id}-${order.butcherId}-${index}`} className={getOrderRowStyle(order.status)}>
+                              <TableCell className="font-medium whitespace-nowrap">
+                                {order.id.replace('ORD-', '')}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                <Badge variant="outline">
+                                  {order.butcherName || freshButchers.find(b => b.id === order.butcherId)?.name}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="max-w-xs space-y-1">
+                                  {order.items.map((item, itemIndex) => {
+                                    // Extract only English name
+                                    const englishName = extractEnglishName(item.name)
+                                    return (
+                                      <div key={itemIndex} className="text-sm">
+                                        <span className="font-medium">{englishName}</span>
+                                        <span className="text-muted-foreground ml-1">
+                                          ({item.quantity}{item.unit})
+                                        </span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="text-sm space-y-1">
+                                  {order.items.map((item, itemIndex) => {
+                                    const itemPreparingWeight = getItemPreparingWeight(order, item.name)
+                                    if (!itemPreparingWeight || itemPreparingWeight === '-') return null
+                                    const englishName = extractEnglishName(item.name)
+                                    return (
+                                      <div key={itemIndex} className="text-xs">
+                                        <span className="font-medium">{englishName}:</span> {itemPreparingWeight}
+                                      </div>
+                                    )
+                                  })}
+                                  {order.items.every(item => {
+                                    const weight = getItemPreparingWeight(order, item.name)
+                                    return !weight || weight === '-'
+                                  }) && (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {getStatusBadge(order.status, order.rejectionReason)}
+                                {order.rejectionReason && (
+                                  <div className="text-xs text-red-600 mt-1">
+                                    {order.rejectionReason}
+                                  </div>
                                 )}
-                                {item.cutType && (
-                                  <span className="text-muted-foreground ml-1">
-                                    - {item.cutType}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {getStatusBadge(order.status, order.rejectionReason)}
-                          {order.rejectionReason && (
-                            <div className="text-xs text-red-600 mt-1">
-                              {order.rejectionReason}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            {format(new Date(order.orderTime), 'dd/MM/yyyy')}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {format(new Date(order.orderTime), 'HH:mm')}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {order.completionTime ? (
-                            <div className="text-sm">
-                              {order.completionTime} min
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {order.pickedWeight ? (
-                            <div className="text-sm">
-                              <Weight className="h-3 w-3 inline mr-1" />
-                              {order.pickedWeight} kg
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {order.revenue ? (
-                            <div className="text-sm font-medium text-green-600">
-                              <IndianRupee className="h-3 w-3 inline mr-1" />
-                              {order.revenue.toLocaleString('en-IN')}
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {order.address ? (
-                            <div className="max-w-xs text-sm">
-                              <MapPin className="h-3 w-3 inline mr-1" />
-                              {order.address}
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="text-sm space-y-1">
+                                  {order.items.map((item, itemIndex) => {
+                                    const itemRevenue = getItemRevenue(order, item.name)
+                                    if (itemRevenue <= 0) return null
+                                    const englishName = extractEnglishName(item.name)
+                                    return (
+                                      <div key={itemIndex} className="text-xs font-medium text-green-600">
+                                        <IndianRupee className="h-2.5 w-2.5 inline mr-0.5" />
+                                        {englishName}: {itemRevenue.toFixed(2)}
+                                      </div>
+                                    )
+                                  })}
+                                  {order.items.every(item => getItemRevenue(order, item.name) <= 0) && (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
-              </div>
-
-              {/* Mobile Card View */}
-              <div className="lg:hidden space-y-4">
-                {filteredOrders.map((order, index) => (
-                  <Card key={`${order.id}-${order.butcherId}-${index}`} className={`${getOrderRowStyle(order.status)}`}>
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <CardTitle className="text-lg">Order #{order.id.replace('ORD-', '')}</CardTitle>
-                          <CardDescription className="flex items-center gap-2 mt-1">
-                            <Badge variant="outline">
-                              {order.butcherName || freshButchers.find(b => b.id === order.butcherId)?.name}
-                            </Badge>
-                            <span>•</span>
-                            <span>{order.customerName}</span>
-                          </CardDescription>
-                        </div>
-                        {getStatusBadge(order.status, order.rejectionReason)}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {/* Items */}
-                      <div>
-                        <h4 className="font-medium text-sm mb-2">Items:</h4>
-                        <div className="space-y-1">
-                          {order.items.map((item, index) => (
-                            <div key={index} className="text-sm">
-                              <span className="font-medium">{item.name}</span>
-                              <span className="text-muted-foreground ml-1">
-                                ({item.quantity}{item.unit})
-                              </span>
-                              {item.size && (
-                                <span className="text-primary ml-1 font-medium">
-                                  - Size: {item.size}
-                                </span>
-                              )}
-                              {item.cutType && (
-                                <span className="text-muted-foreground ml-1">
-                                  - {item.cutType}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Order Details */}
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Order Time:</span>
-                          <div className="font-medium">
-                            {format(new Date(order.orderTime), 'dd/MM/yyyy HH:mm')}
-                          </div>
-                        </div>
-                        {order.completionTime && (
-                          <div>
-                            <span className="text-muted-foreground">Prep Time:</span>
-                            <div className="font-medium">{order.completionTime} min</div>
-                          </div>
-                        )}
-                        {order.pickedWeight && (
-                          <div>
-                            <span className="text-muted-foreground">Weight:</span>
-                            <div className="font-medium flex items-center">
-                              <Weight className="h-3 w-3 mr-1" />
-                              {order.pickedWeight} kg
-                            </div>
-                          </div>
-                        )}
-                        {order.revenue && (
-                          <div>
-                            <span className="text-muted-foreground">Revenue:</span>
-                            <div className="font-medium text-green-600 flex items-center">
-                              <IndianRupee className="h-3 w-3 mr-1" />
-                              {order.revenue.toLocaleString('en-IN')}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Address */}
-                      {order.address && (
-                        <div>
-                          <span className="text-muted-foreground text-sm">Address:</span>
-                          <div className="text-sm flex items-start">
-                            <MapPin className="h-3 w-3 mr-1 mt-0.5 flex-shrink-0" />
-                            {order.address}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Rejection Reason */}
-                      {order.rejectionReason && (
-                        <div>
-                          <span className="text-muted-foreground text-sm">Reason:</span>
-                          <div className="text-sm text-red-600">
-                            {order.rejectionReason}
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
               </div>
             </>
           )}

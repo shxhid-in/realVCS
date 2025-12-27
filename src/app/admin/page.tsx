@@ -30,12 +30,10 @@ import {
   BarChart3, 
   MessageSquare, 
   Package,
-  Settings,
-  Bell,
   LogOut,
   Trash2,
   Target,
-  Activity
+  ShoppingBag
 } from "lucide-react"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "../../components/ui/chart"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Line, LineChart, Area, AreaChart, ResponsiveContainer } from "recharts"
@@ -45,10 +43,9 @@ import { toDate } from "../../lib/utils"
 import { useOrderCache } from "../../hooks/useOrderCache"
 import { useClientCache } from "../../hooks/useClientCache"
 import { freshButchers } from "../../lib/butcherConfig"
-import { CommissionMarkupSettings } from "../../components/admin/CommissionMarkupSettings"
 import { OrdersAnalytics } from "../../components/admin/OrdersAnalytics"
 import DAMAnalysis from "../../components/admin/DAMAnalysis"
-import { RateLimitMonitor } from "../../components/admin/RateLimitMonitor"
+import { OrdersTab } from "../../components/admin/OrdersTab"
 import { ThemeToggle } from "../../components/ThemeToggle"
 
 // Helper function to extract order number from full order ID for display
@@ -88,8 +85,6 @@ export default function AdminPage() {
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [adminResponse, setAdminResponse] = useState('');
   const [isResponding, setIsResponding] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [requestToDelete, setRequestToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -310,51 +305,6 @@ export default function AdminPage() {
 
   const handleManualRefresh = () => {
     fetchSupportRequests(true);
-    fetchNotifications();
-  };
-
-  // Fetch notifications
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const response = await fetch('/api/notifications');
-      if (response.ok) {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json();
-          setNotifications(data.notifications || []);
-          setUnreadNotifications(data.unreadCount || 0);
-        } else {
-        }
-      } else {
-        const errorText = await response.text().catch(() => 'Unknown error');
-      }
-    } catch (error) {
-    }
-  }, []);
-
-  // Mark notification as read
-  const markNotificationAsRead = async (notificationId: string) => {
-    try {
-      const response = await fetch('/api/notifications', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          notificationId,
-          read: true
-        }),
-      });
-      
-      if (response.ok) {
-        fetchNotifications(); // Refresh notifications
-      } else {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.error(`Failed to mark notification as read: ${response.status} ${errorText}`);
-      }
-    } catch (error) {
-      console.error('Error marking notification as read:', error);
-    }
   };
 
   // Handle admin response to support request
@@ -456,17 +406,15 @@ export default function AdminPage() {
     if (isAdmin) {
       fetchAllOrders();
       fetchSupportRequests();
-      fetchNotifications();
     }
   }, [isAdmin]); // Remove function dependencies to prevent infinite loop
 
-  // Poll for support requests and notifications updates every 30 seconds
+  // Poll for support requests updates every 30 seconds
   useEffect(() => {
     if (!isAdmin || !pollingEnabled) return;
 
     const interval = setInterval(() => {
       fetchSupportRequests();
-      fetchNotifications();
     }, 30000); // Poll every 30 seconds
 
     return () => clearInterval(interval);
@@ -627,12 +575,16 @@ export default function AdminPage() {
           <Tabs defaultValue="overview" className="w-full">
             <TabsList 
               ref={tabsListRef} 
-              className="w-full overflow-x-auto flex sm:grid sm:grid-cols-8 gap-1 sm:gap-2 p-1 sm:p-1 h-auto sm:h-10 px-0 sm:px-1 scrollbar-hide justify-start"
+              className="w-full overflow-x-auto flex sm:grid sm:grid-cols-6 gap-1 sm:gap-2 p-1 sm:p-1 h-auto sm:h-10 px-0 sm:px-1 scrollbar-hide justify-start"
               style={{ scrollBehavior: 'smooth' }}
             >
               <TabsTrigger value="overview" className="flex items-center gap-2 whitespace-nowrap pl-4 pr-3 sm:px-4 flex-shrink-0 min-w-fit">
                 <BarChart3 className="h-4 w-4 flex-shrink-0" />
                 <span>Overview</span>
+              </TabsTrigger>
+              <TabsTrigger value="orders" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+                <ShoppingBag className="h-4 w-4 flex-shrink-0" />
+                <span>Orders</span>
               </TabsTrigger>
               <TabsTrigger value="butchers" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
                 <Users className="h-4 w-4 flex-shrink-0" />
@@ -647,28 +599,9 @@ export default function AdminPage() {
                 <span className="hidden sm:inline">D.A.M Analysis</span>
                 <span className="sm:hidden">D.A.M</span>
               </TabsTrigger>
-              <TabsTrigger value="rate-monitor" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
-                <Activity className="h-4 w-4 flex-shrink-0" />
-                <span className="hidden sm:inline">Rate Monitor</span>
-                <span className="sm:hidden">Rates</span>
-              </TabsTrigger>
-              <TabsTrigger value="notifications" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit relative">
-                <Bell className="h-4 w-4 flex-shrink-0" />
-                <span className="hidden sm:inline">Notifications</span>
-                <span className="sm:hidden">Alerts</span>
-                {unreadNotifications > 0 && (
-                  <Badge variant="destructive" className="ml-1 h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center absolute -top-1 -right-1">
-                    {unreadNotifications}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="support" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
+              <TabsTrigger value="support" className="flex items-center gap-2 whitespace-nowrap pl-3 pr-4 sm:px-4 flex-shrink-0 min-w-fit">
                 <MessageSquare className="h-4 w-4 flex-shrink-0" />
                 <span>Support</span>
-              </TabsTrigger>
-              <TabsTrigger value="settings" className="flex items-center gap-2 whitespace-nowrap pl-3 pr-4 sm:px-4 flex-shrink-0 min-w-fit">
-                <Settings className="h-4 w-4 flex-shrink-0" />
-                <span>Settings</span>
               </TabsTrigger>
             </TabsList>
 
@@ -980,6 +913,11 @@ export default function AdminPage() {
           </Card>
         </TabsContent>
 
+        {/* Orders Tab */}
+            <TabsContent value="orders" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <OrdersTab />
+        </TabsContent>
+
         {/* Analytics Tab */}
             <TabsContent value="analytics" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           <OrdersAnalytics 
@@ -996,112 +934,6 @@ export default function AdminPage() {
             onRefresh={fetchAllOrders}
             isLoading={isLoading}
           />
-        </TabsContent>
-
-        {/* Rate Monitor Tab */}
-            <TabsContent value="rate-monitor" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
-          <RateLimitMonitor />
-        </TabsContent>
-
-        {/* Notifications Tab */}
-            <TabsContent value="notifications" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-2xl font-semibold">Notifications</h2>
-              <p className="text-muted-foreground">System notifications and alerts</p>
-            </div>
-            <Button onClick={fetchNotifications} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          </div>
-
-          {notifications.length === 0 ? (
-            <Card>
-              <CardContent className="text-center py-8">
-                <Bell className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                <p className="text-muted-foreground">No notifications found</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-4">
-              {notifications.map((notification) => (
-                <Card 
-                  key={notification.id} 
-                  className={`cursor-pointer transition-colors ${!notification.read ? 'border-orange-200 bg-orange-50 dark:bg-orange-950/20' : 'border-gray-200 bg-gray-50 dark:bg-gray-950/20'}`}
-                  onClick={() => !notification.read && markNotificationAsRead(notification.id)}
-                >
-                  <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          {notification.type === 'order_declined' ? (
-                            <>
-                              <XCircle className="h-5 w-5 text-red-500" />
-                              Order Declined
-                            </>
-                          ) : (
-                            <>
-                              <Bell className="h-5 w-5" />
-                              System Notification
-                            </>
-                          )}
-                        </CardTitle>
-                        <CardDescription>
-                          From: {notification.butcherName} • {format(new Date(notification.createdAt), 'MMM dd, yyyy HH:mm')}
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {!notification.read && (
-                          <div className="h-2 w-2 bg-orange-500 rounded-full"></div>
-                        )}
-                        <Badge variant={notification.type === 'order_declined' ? 'destructive' : 'secondary'}>
-                          {notification.type.replace('_', ' ')}
-                        </Badge>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {notification.orderNumber && (
-                      <div>
-                        <Label className="text-sm font-medium">Order:</Label>
-                        <p className="text-sm text-muted-foreground mt-1">{notification.orderNumber}</p>
-                      </div>
-                    )}
-                    
-                    {notification.reason && (
-                      <div>
-                        <Label className="text-sm font-medium">Reason:</Label>
-                        <p className="text-sm text-muted-foreground mt-1">{notification.reason}</p>
-                      </div>
-                    )}
-
-                    {notification.data && notification.data.potentialRevenue && (
-                      <div>
-                        <Label className="text-sm font-medium">Lost Revenue:</Label>
-                        <p className="text-sm text-red-600 font-medium mt-1">
-                          ₹{notification.data.potentialRevenue.toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-
-                    {notification.data && notification.data.items && (
-                      <div>
-                        <Label className="text-sm font-medium">Items:</Label>
-                        <div className="mt-1 space-y-1">
-                          {notification.data.items.map((item: any, index: number) => (
-                            <p key={index} className="text-sm text-muted-foreground">
-                              • {item.name} ({item.quantity}kg)
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
         </TabsContent>
 
         {/* Support Tab */}
@@ -1281,11 +1113,6 @@ export default function AdminPage() {
             </Card>
           )}
         </TabsContent>
-
-            {/* Settings Tab */}
-            <TabsContent value="settings" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
-              <CommissionMarkupSettings />
-            </TabsContent>
           </Tabs>
 
           {/* Confirmation Dialog */}

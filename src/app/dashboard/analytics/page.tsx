@@ -15,6 +15,7 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { format } from "date-fns"
 import { useState, useEffect, useCallback } from "react"
 import { toDate, getTimeValue } from "../../../lib/utils"
+import { extractEnglishName } from "../../../lib/butcherConfig"
 
 // Helper function to extract order number from full order ID for display
 const getDisplayOrderId = (orderId: string): string => {
@@ -663,8 +664,10 @@ export default function AnalyticsPage() {
                 <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
                     <TableHead>Order ID</TableHead>
+                    <TableHead>Butcher</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>Preparing Weight</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Prep. Time</TableHead>
                     <TableHead className="text-right">Revenue</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -672,15 +675,41 @@ export default function AnalyticsPage() {
                   {deduplicatedTodayOrders.length > 0 ? deduplicatedTodayOrders.map((order, index) => (
                     <TableRow key={`${order.id}-${index}`}>
                       <TableCell className="font-medium">{getDisplayOrderId(order.id)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {order.butcherName || order.butcherId}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="max-w-xs space-y-1">
+                          {order.items.map((item, itemIndex) => {
+                            // Extract only English name
+                            const englishName = extractEnglishName(item.name)
+                            return (
+                              <div key={itemIndex} className="text-sm">
+                                <span className="font-medium">{englishName}</span>
+                                <span className="text-muted-foreground ml-1">
+                                  ({item.quantity}{item.unit})
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          <Weight className="h-3 w-3 inline mr-1" />
+                          {calculateOrderPreparingWeight(order).toFixed(2)} kg
+                        </div>
+                      </TableCell>
                       <TableCell>{getStatusBadge(order)}</TableCell>
-                      <TableCell>{getPrepTime(order)}</TableCell>
                       <TableCell className="text-right">
                         ₹{calculateOrderRevenueAnalytics(order).toLocaleString('en-IN')}
                       </TableCell>
                     </TableRow>
                   )) : (
                      <TableRow>
-                       <TableCell colSpan={4} className="h-24 text-center">
+                       <TableCell colSpan={6} className="h-24 text-center">
                          No orders today.
                        </TableCell>
                      </TableRow>
