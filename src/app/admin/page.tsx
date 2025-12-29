@@ -17,7 +17,6 @@ import type { Order } from "../../lib/types"
 import { 
   IndianRupee, 
   ShoppingCart, 
-  Timer, 
   CheckCircle, 
   XCircle, 
   TrendingUp, 
@@ -36,13 +35,13 @@ import {
   ShoppingBag
 } from "lucide-react"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "../../components/ui/chart"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Line, LineChart, Area, AreaChart, ResponsiveContainer } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { format } from "date-fns"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { toDate } from "../../lib/utils"
 import { useOrderCache } from "../../hooks/useOrderCache"
 import { useClientCache } from "../../hooks/useClientCache"
-import { freshButchers } from "../../lib/butcherConfig"
+import { freshButchers, extractEnglishName } from "../../lib/butcherConfig"
 import { OrdersAnalytics } from "../../components/admin/OrdersAnalytics"
 import DAMAnalysis from "../../components/admin/DAMAnalysis"
 import { OrdersTab } from "../../components/admin/OrdersTab"
@@ -476,37 +475,68 @@ export default function AdminPage() {
 
   const filteredOrders = getFilteredOrders();
   const completedOrders = filteredOrders.filter(o => ['completed', 'prepared', 'ready to pick up'].includes(o.status));
-  const declinedOrders = filteredOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
+  const rejectedOrders = filteredOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
   const preparingOrders = filteredOrders.filter(o => o.status === 'preparing');
 
   // Calculate analytics
-  const totalRevenue = completedOrders.reduce((acc, order) => acc + (order.revenue || 0), 0);
-  const totalOrders = filteredOrders.length;
-  const completionRate = totalOrders > 0 ? (completedOrders.length / totalOrders) * 100 : 0;
-  const avgPrepTime = completedOrders.reduce((acc, order) => {
-    const start = toDate(order.preparationStartTime);
-    const end = toDate(order.preparationEndTime);
-    if (start && end) {
-      return acc + (end.getTime() - start.getTime()) / (1000 * 60); // minutes
+  const totalRevenue = completedOrders.reduce((acc, order) => {
+    // Use itemRevenues if available, otherwise fallback to order.revenue
+    if (order.itemRevenues) {
+      return acc + Object.values(order.itemRevenues).reduce((sum, rev) => sum + rev, 0);
     }
-    return acc;
-  }, 0) / completedOrders.length || 0;
+    return acc + (order.revenue || 0);
+  }, 0);
+  const totalOrders = filteredOrders.length;
+  
+  // Calculate most ordered item with total quantity
+  const itemQuantityMap = new Map<string, { quantity: number; unit: string }>();
+  filteredOrders.forEach(order => {
+    order.items.forEach(item => {
+      const englishName = extractEnglishName(item.name);
+      const existing = itemQuantityMap.get(englishName) || { quantity: 0, unit: item.unit };
+      
+      // Convert to kg for comparison (g -> kg, nos stays as is)
+      let quantityToAdd = item.quantity;
+      if (item.unit === 'g') {
+        quantityToAdd = item.quantity / 1000; // Convert grams to kg
+        existing.unit = 'kg';
+      } else if (item.unit === 'nos') {
+        existing.unit = 'nos';
+      } else {
+        existing.unit = 'kg';
+      }
+      
+      existing.quantity += quantityToAdd;
+      itemQuantityMap.set(englishName, existing);
+    });
+  });
+  
+  const mostOrderedItem = Array.from(itemQuantityMap.entries())
+    .map(([name, data]) => ({ name, quantity: data.quantity, unit: data.unit }))
+    .sort((a, b) => b.quantity - a.quantity)[0] || null;
 
-  // Butcher performance data
+  // Butcher performance data for table
   const butcherPerformance = freshButchers.map(butcher => {
     const butcherOrders = filteredOrders.filter(o => o.butcherId === butcher.id);
-    const completed = butcherOrders.filter(o => ['completed', 'prepared'].includes(o.status));
-    const revenue = completed.reduce((acc, order) => acc + (order.revenue || 0), 0);
+    const completed = butcherOrders.filter(o => ['completed', 'prepared', 'ready to pick up'].includes(o.status));
+    const rejected = butcherOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
+    const revenue = completed.reduce((acc, order) => {
+      // Use itemRevenues if available, otherwise fallback to order.revenue
+      if (order.itemRevenues) {
+        return acc + Object.values(order.itemRevenues).reduce((sum, rev) => sum + rev, 0);
+      }
+      return acc + (order.revenue || 0);
+    }, 0);
     
     return {
       id: butcher.id,
       name: butcher.name,
       totalOrders: butcherOrders.length,
       completedOrders: completed.length,
-      revenue,
-      completionRate: butcherOrders.length > 0 ? (completed.length / butcherOrders.length) * 100 : 0
+      rejectedOrders: rejected.length,
+      revenue
     };
-  });
+  }).filter(butcher => butcher.totalOrders > 0); // Only show butchers with orders
 
   // Chart data
   const revenueChartData = butcherPerformance.map(butcher => ({
@@ -716,7 +746,7 @@ export default function AdminPage() {
                   <>
                     <div className="text-2xl font-bold">{totalOrders}</div>
                     <p className="text-xs text-muted-foreground">
-                      {completedOrders.length} completed, {declinedOrders.length} declined
+                      {completedOrders.length} completed, {rejectedOrders.length} rejected
                     </p>
                   </>
                 )}
@@ -725,20 +755,20 @@ export default function AdminPage() {
 
             <Card className="w-full max-w-full">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
-                <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
+                <CardTitle className="text-sm font-medium">Completed Orders</CardTitle>
                 <CheckCircle className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </CardHeader>
               <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
                 {isLoading ? (
                   <>
-                    <Skeleton className="h-8 w-20 mb-2" />
-                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-8 w-16 mb-2" />
+                    <Skeleton className="h-4 w-40" />
                   </>
                 ) : (
                   <>
-                    <div className="text-2xl font-bold">{completionRate.toFixed(1)}%</div>
+                    <div className="text-2xl font-bold">{completedOrders.length}</div>
                     <p className="text-xs text-muted-foreground">
-                      Orders completed successfully
+                      Successfully completed orders
                     </p>
                   </>
                 )}
@@ -747,112 +777,137 @@ export default function AdminPage() {
 
             <Card className="w-full max-w-full">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4 sm:px-6 sm:pt-6">
-                <CardTitle className="text-sm font-medium">Avg. Prep Time</CardTitle>
-                <Timer className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <CardTitle className="text-sm font-medium">Most Ordered Item</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </CardHeader>
               <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
                 {isLoading ? (
                   <>
-                    <Skeleton className="h-8 w-20 mb-2" />
-                    <Skeleton className="h-4 w-36" />
+                    <Skeleton className="h-8 w-32 mb-2" />
+                    <Skeleton className="h-4 w-48" />
                   </>
                 ) : (
                   <>
-                    <div className="text-2xl font-bold">{avgPrepTime.toFixed(1)} min</div>
-                    <p className="text-xs text-muted-foreground">
-                      Average preparation time
-                    </p>
+                    {mostOrderedItem ? (
+                      <>
+                        <div className="text-lg font-bold truncate">{mostOrderedItem.name}</div>
+                        <p className="text-xs text-muted-foreground">
+                          Total quantity: {mostOrderedItem.quantity.toFixed(2)}{mostOrderedItem.unit}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-lg font-bold text-muted-foreground">No items</div>
+                        <p className="text-xs text-muted-foreground">
+                          No orders in selected period
+                        </p>
+                      </>
+                    )}
                   </>
                 )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Charts with internal horizontal scroll on mobile */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card className="w-full max-w-full overflow-hidden">
-              <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
-                <CardTitle className="text-lg sm:text-xl">Revenue by Butcher</CardTitle>
-                <CardDescription className="text-sm mt-1">Revenue distribution across butchers</CardDescription>
-              </CardHeader>
-              <CardContent className="px-0 sm:px-4 lg:px-6 pb-4 sm:pb-6">
-                {isLoading ? (
-                  <div className="h-[300px] flex items-center justify-center">
-                    <Skeleton className="h-[300px] w-full" />
+          {/* Revenue Chart */}
+          <Card className="w-full max-w-full overflow-hidden">
+            <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+              <CardTitle className="text-lg sm:text-xl">Revenue by Butcher</CardTitle>
+              <CardDescription className="text-sm mt-1">Revenue distribution across butchers</CardDescription>
+            </CardHeader>
+            <CardContent className="px-0 sm:px-4 lg:px-6 pb-4 sm:pb-6">
+              {isLoading ? (
+                <div className="h-[300px] flex items-center justify-center">
+                  <Skeleton className="h-[300px] w-full" />
+                </div>
+              ) : revenueChartData.length === 0 ? (
+                <div className="h-[300px] flex items-center justify-center">
+                  <div className="text-center">
+                    <BarChart3 className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <p className="text-muted-foreground">No revenue data available</p>
+                    <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
                   </div>
-                ) : revenueChartData.length === 0 ? (
-                  <div className="h-[300px] flex items-center justify-center">
-                    <div className="text-center">
-                      <BarChart3 className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                      <p className="text-muted-foreground">No revenue data available</p>
-                      <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
-                    </div>
+                </div>
+              ) : (
+                <div className="w-full overflow-x-auto scrollbar-hide">
+                  <div className="min-w-[600px] px-4 sm:px-6">
+                    <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                      <BarChart data={revenueChartData}>
+                        <CartesianGrid vertical={false} />
+                        <XAxis dataKey="name" tickLine={false} axisLine={false} angle={-45} textAnchor="end" height={60} />
+                        <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value}`} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
+                      </BarChart>
+                    </ChartContainer>
                   </div>
-                ) : (
-                  <div className="w-full overflow-x-auto scrollbar-hide">
-                    <div className="min-w-[600px] px-4 sm:px-6">
-                      <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                        <BarChart data={revenueChartData}>
-                          <CartesianGrid vertical={false} />
-                          <XAxis dataKey="name" tickLine={false} axisLine={false} angle={-45} textAnchor="end" height={60} />
-                          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value}`} />
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                          <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
-                        </BarChart>
-                      </ChartContainer>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-            <Card className="w-full max-w-full overflow-hidden">
-              <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
-                <CardTitle className="text-lg sm:text-xl">Revenue Trend</CardTitle>
-                <CardDescription className="text-sm mt-1">Revenue distribution by butcher over time</CardDescription>
-              </CardHeader>
-              <CardContent className="px-0 sm:px-4 lg:px-6 pb-4 sm:pb-6">
-                {isLoading ? (
-                  <div className="h-[300px] flex items-center justify-center">
-                    <Skeleton className="h-[300px] w-full" />
-                  </div>
-                ) : revenueChartData.length === 0 ? (
-                  <div className="h-[300px] flex items-center justify-center">
-                    <div className="text-center">
-                      <TrendingUp className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                      <p className="text-muted-foreground">No revenue data available</p>
-                      <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full overflow-x-auto scrollbar-hide">
-                    <div className="min-w-[600px] px-4 sm:px-6">
-                      <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                        <AreaChart data={revenueChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} />
-                          <YAxis tickFormatter={(value) => `₹${value}`} />
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                          <Area 
-                            type="monotone" 
-                            dataKey="revenue" 
-                            stroke="#8884d8" 
-                            fill="#8884d8" 
-                            fillOpacity={0.6}
-                          />
-                        </AreaChart>
-                      </ChartContainer>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          {/* Butcher Order Rate Table */}
+          <Card className="w-full max-w-full">
+            <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
+              <CardTitle className="text-lg sm:text-xl">Order Rate by Butcher</CardTitle>
+              <CardDescription className="text-sm mt-1">Completed and rejected orders with revenue breakdown</CardDescription>
+            </CardHeader>
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+              {isLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : butcherPerformance.length === 0 ? (
+                <div className="text-center py-8">
+                  <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No order data available</p>
+                  <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
+                </div>
+              ) : (
+                <div className="w-full overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Butcher</TableHead>
+                        <TableHead className="text-right">Total Orders</TableHead>
+                        <TableHead className="text-right">Completed</TableHead>
+                        <TableHead className="text-right">Rejected</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {butcherPerformance.map((butcher) => (
+                        <TableRow key={butcher.id}>
+                          <TableCell className="font-medium">{butcher.name}</TableCell>
+                          <TableCell className="text-right">{butcher.totalOrders}</TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant="default" className="bg-green-500">
+                              {butcher.completedOrders}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant="destructive">
+                              {butcher.rejectedOrders}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            ₹{butcher.revenue.toLocaleString('en-IN')}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Butchers Tab */}
         <TabsContent value="butchers" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
-          <ButcherPerformance 
+          <OrdersAnalytics 
             allOrders={allOrders} 
             onRefresh={fetchAllOrders}
             isLoading={isLoading}
@@ -866,7 +921,7 @@ export default function AdminPage() {
 
         {/* Analytics Tab */}
             <TabsContent value="analytics" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
-          <OrdersAnalytics 
+          <ButcherPerformance 
             allOrders={allOrders} 
             onRefresh={fetchAllOrders}
             isLoading={isLoading}
