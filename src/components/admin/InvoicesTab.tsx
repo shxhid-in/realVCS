@@ -61,10 +61,19 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
     setIsLoading(true)
     try {
       const response = await fetch(`/api/zoho/invoices?date=${selectedDate}`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch invoices')
+      const data = await response.json()
+      
+      // Handle 429 rate limit specifically
+      if (response.status === 429) {
+        const retryAfter = data.retryAfter || 5
+        throw new Error(`Rate limit exceeded (429). Please try again in ${retryAfter} seconds.`)
       }
-      const { invoices: fetchedInvoices } = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch invoices')
+      }
+      
+      const { invoices: fetchedInvoices } = data
       
       // Debug: Log first invoice to see structure
       if (process.env.NODE_ENV === 'development' && fetchedInvoices && fetchedInvoices.length > 0) {
@@ -74,8 +83,46 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
           hasLineItems: !!fetchedInvoices[0].line_items,
           lineItemsLength: fetchedInvoices[0].line_items?.length || 0,
           lineItems: fetchedInvoices[0].line_items,
-          allKeys: Object.keys(fetchedInvoices[0])
+          allKeys: Object.keys(fetchedInvoices[0]),
+          fullInvoice: fetchedInvoices[0] // Log full invoice to debug
         })
+      }
+      
+      // If invoices don't have line_items, fetch them for the first few invoices
+      // This is a workaround if Zoho API doesn't include line_items in list response
+      if (fetchedInvoices && fetchedInvoices.length > 0) {
+        const invoicesWithoutItems = fetchedInvoices.filter((inv: ZohoInvoice) => !inv.line_items || inv.line_items.length === 0)
+        if (invoicesWithoutItems.length > 0 && invoicesWithoutItems.length <= 10) {
+          // Fetch line items for invoices that don't have them (limit to 10 to avoid rate limits)
+          const invoicesWithItems = await Promise.all(
+            invoicesWithoutItems.slice(0, 10).map(async (invoice: ZohoInvoice) => {
+              try {
+                const detailResponse = await fetch(`/api/zoho/invoices?invoice_id=${invoice.invoice_id}`)
+                if (detailResponse.ok) {
+                  const { invoice: fullInvoice } = await detailResponse.json()
+                  return fullInvoice || invoice
+                }
+              } catch (error) {
+                console.error(`Error fetching invoice details for ${invoice.invoice_id}:`, error)
+              }
+              return invoice
+            })
+          )
+          
+          // Replace invoices without items with invoices that have items
+          const updatedInvoices = fetchedInvoices.map((inv: ZohoInvoice) => {
+            const updated = invoicesWithItems.find((u: ZohoInvoice) => u.invoice_id === inv.invoice_id)
+            return updated || inv
+          })
+          
+          setInvoices(updatedInvoices)
+          invoicesCache.set(selectedDate, {
+            data: updatedInvoices,
+            timestamp: Date.now()
+          })
+          setHasFetched(true)
+          return
+        }
       }
       
       invoicesCache.set(selectedDate, {
@@ -89,12 +136,29 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
       console.error('Error fetching invoices:', error)
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch invoices"
       
-      if (errorMessage.includes('rate limit') || errorMessage.includes('exceeded')) {
+      // Check if it's a rate limit error (429)
+      const isRateLimit = errorMessage.includes('429') || 
+                         errorMessage.includes('rate limit') || 
+                         errorMessage.includes('Rate limit exceeded') ||
+                         errorMessage.includes('exceeded')
+      
+      if (isRateLimit) {
+        // Try to extract retry after time
+        const retryMatch = errorMessage.match(/try again in (\d+) seconds?/i)
+        const retryAfter = retryMatch ? retryMatch[1] : 'a few'
+        
         toast({
           variant: "destructive",
           title: "Rate Limit Exceeded",
-          description: "Too many API requests. Please wait a moment and try again.",
+          description: `Too many API requests. Please wait ${retryAfter} seconds and try again. The system will automatically retry.`,
         })
+        
+        // Auto-retry after delay (exponential backoff handled by server)
+        if (!forceRefresh) {
+          setTimeout(() => {
+            fetchInvoices(false)
+          }, 5000) // Retry after 5 seconds
+        }
       } else {
         toast({
           variant: "destructive",

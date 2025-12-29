@@ -1,10 +1,10 @@
 // Service Worker Version - Increment this on every deployment to force updates
 // Format: YYYY.MM.DD-RELEASE_NUMBER
-const SW_VERSION = '2025.12.30-1';
+const SW_VERSION = '2025.12.30-2';
 
 // Cache names - Increment version numbers on each deployment to clear old caches
-const STATIC_CACHE_NAME = 'butcherbot-static-v12';
-const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v12';
+const STATIC_CACHE_NAME = 'butcherbot-static-v13';
+const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v13';
 
 // Files to cache for offline functionality
 // Note: For Next.js, these routes will be cached as HTML pages

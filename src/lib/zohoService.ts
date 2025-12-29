@@ -103,6 +103,44 @@ class ZohoService {
   private async makeRequest(
     url: string,
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+    body?: any,
+    retryCount: number = 0
+  ): Promise<any> {
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 1000; // 1 second base delay
+    
+    try {
+      return await this.executeRequest(url, method, body);
+    } catch (error: any) {
+      // Check if it's a rate limit error (429)
+      const isRateLimit = error.message?.includes('429') || 
+                         error.message?.includes('rate limit') ||
+                         error.message?.includes('Too Many Requests') ||
+                         (error.response?.status === 429);
+      
+      // Check if we should retry
+      if (isRateLimit && retryCount < MAX_RETRIES) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delay = BASE_DELAY * Math.pow(2, retryCount);
+        
+        if (process.env.ZOHO_DEBUG === 'true') {
+          console.warn(`[Zoho Debug] Rate limited. Retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        // Retry the request
+        return this.makeRequest(url, method, body, retryCount + 1);
+      }
+      
+      // If not rate limit or max retries reached, throw the error
+      throw error;
+    }
+  }
+
+  private async executeRequest(
+    url: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
     body?: any
   ): Promise<any> {
     // Determine which auth to use based on URL or config
@@ -183,67 +221,86 @@ class ZohoService {
       }
     }
 
-    try {
-      const response = await fetch(url, options);
+    const response = await fetch(url, options);
+    
+    // Handle 429 status code specifically
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After');
+      const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
       
-      if (!response.ok) {
-        // Try to get detailed error information
-        let errorData: any = {};
-        let errorText = '';
-        
-        try {
-          errorText = await response.text();
-          errorData = JSON.parse(errorText);
-        } catch {
-          // If parsing fails, use the text as error message
-          errorData = { message: errorText || response.statusText };
-        }
-
-        // Enhanced error logging (only in debug mode)
-        if (process.env.ZOHO_DEBUG === 'true') {
-          console.error('[Zoho Debug] API Error Response:', {
-            status: response.status,
-            statusText: response.statusText,
-            url,
-            errorData,
-            headers: Object.fromEntries(response.headers.entries()),
-          });
-        }
-
-        // Extract error message from Zoho response format
-        const errorMessage = errorData.message || 
-                           errorData.error_description || 
-                           errorData.error || 
-                           `Zoho API error: ${response.status} ${response.statusText}`;
-        
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      
-      // Handle Zoho API response format
-      if (data.code !== undefined && data.code !== 0) {
-        const errorMessage = data.message || `Zoho API error (code: ${data.code})`;
-        
-        if (process.env.ZOHO_DEBUG === 'true') {
-          console.error('[Zoho Debug] Zoho API Error Code:', {
-            code: data.code,
-            message: data.message,
-            url,
-          });
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      return data;
-    } catch (error) {
-      // Only log to console in debug mode
       if (process.env.ZOHO_DEBUG === 'true') {
-        console.error('[Zoho Debug] Request failed:', error);
+        console.warn('[Zoho Debug] Rate limit hit (429)', {
+          url,
+          retryAfter: retryAfterSeconds,
+        });
       }
+      
+      // Import rate limiter to record the rate limit
+      try {
+        const { getZohoRateLimiter } = await import('./zohoRateLimiter');
+        getZohoRateLimiter().recordRateLimit();
+      } catch {
+        // Ignore if rate limiter not available
+      }
+      
+      throw new Error(`Rate limit exceeded (429). ${retryAfterSeconds ? `Retry after ${retryAfterSeconds} seconds` : 'Please try again later'}`);
+    }
+    
+    if (!response.ok) {
+      // Try to get detailed error information
+      let errorData: any = {};
+      let errorText = '';
+      
+      try {
+        errorText = await response.text();
+        errorData = JSON.parse(errorText);
+      } catch {
+        // If parsing fails, use the text as error message
+        errorData = { message: errorText || response.statusText };
+      }
+
+      // Enhanced error logging (only in debug mode)
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] API Error Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          url,
+          errorData,
+          headers: Object.fromEntries(response.headers.entries()),
+        });
+      }
+
+      // Extract error message from Zoho response format
+      const errorMessage = errorData.message || 
+                         errorData.error_description || 
+                         errorData.error || 
+                         `Zoho API error: ${response.status} ${response.statusText}`;
+      
+      // Attach status code to error for better handling
+      const error = new Error(errorMessage);
+      (error as any).status = response.status;
+      (error as any).response = response;
       throw error;
     }
+
+    const data = await response.json();
+    
+    // Handle Zoho API response format
+    if (data.code !== undefined && data.code !== 0) {
+      const errorMessage = data.message || `Zoho API error (code: ${data.code})`;
+      
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Zoho API Error Code:', {
+          code: data.code,
+          message: data.message,
+          url,
+        });
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    return data;
   }
 
   /**
@@ -284,17 +341,25 @@ class ZohoService {
       
       // Books API endpoint with date filter
       // Books API uses: /books/v3/invoices?date=YYYY-MM-DD
+      // Note: Zoho Books API list endpoint may not include full line_items by default
+      // We'll fetch them separately if needed when invoice is expanded
       const url = `${this.invoiceBaseUrl}/invoices?date=${formattedDate}&per_page=200`;
       const response = await this.makeRequest(url);
       
       // Handle different response formats
+      let invoices: ZohoInvoice[] = [];
       if (response.invoices) {
-        return response.invoices;
+        invoices = response.invoices;
       } else if (Array.isArray(response)) {
-        return response;
-      } else {
-        return [];
+        invoices = response;
       }
+      
+      // Ensure line_items array exists (even if empty) for each invoice
+      // This prevents "No items" from showing incorrectly
+      return invoices.map(invoice => ({
+        ...invoice,
+        line_items: invoice.line_items || []
+      }));
     } catch (error) {
       if (process.env.ZOHO_DEBUG === 'true') {
         console.error('[Zoho Debug] Error fetching invoices:', error);

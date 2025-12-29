@@ -64,10 +64,19 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
     setIsLoading(true)
     try {
       const response = await fetch(`/api/zoho/payments?date=${selectedDate}`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch payments')
+      const data = await response.json()
+      
+      // Handle 429 rate limit specifically
+      if (response.status === 429) {
+        const retryAfter = data.retryAfter || 5
+        throw new Error(`Rate limit exceeded (429). Please try again in ${retryAfter} seconds.`)
       }
-      const { payments: fetchedPayments } = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch payments')
+      }
+      
+      const { payments: fetchedPayments } = data
       
       if (process.env.NODE_ENV === 'development') {
         console.log('[PaymentsTab] Fetched payments:', {
@@ -98,11 +107,38 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
       }
     } catch (error) {
       console.error('Error fetching payments:', error)
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to fetch payments",
-      })
+      const errorMessage = error instanceof Error ? error.message : "Failed to fetch payments"
+      
+      // Check if it's a rate limit error (429)
+      const isRateLimit = errorMessage.includes('429') || 
+                         errorMessage.includes('rate limit') || 
+                         errorMessage.includes('Rate limit exceeded') ||
+                         errorMessage.includes('exceeded')
+      
+      if (isRateLimit) {
+        // Try to extract retry after time
+        const retryMatch = errorMessage.match(/try again in (\d+) seconds?/i)
+        const retryAfter = retryMatch ? retryMatch[1] : 'a few'
+        
+        toast({
+          variant: "destructive",
+          title: "Rate Limit Exceeded",
+          description: `Too many API requests. Please wait ${retryAfter} seconds and try again. The system will automatically retry.`,
+        })
+        
+        // Auto-retry after delay (exponential backoff handled by server)
+        if (!forceRefresh) {
+          setTimeout(() => {
+            fetchPayments(false)
+          }, 5000) // Retry after 5 seconds
+        }
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: errorMessage,
+        })
+      }
     } finally {
       setIsLoading(false)
     }
