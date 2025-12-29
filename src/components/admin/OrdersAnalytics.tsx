@@ -714,29 +714,29 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                 <div className="min-w-[800px] lg:min-w-0 lg:w-full px-4 sm:px-6 lg:px-0">
                   <div className="border rounded-lg">
                     <Table className="w-full">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Butcher</TableHead>
-                          <TableHead>Items</TableHead>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Butcher</TableHead>
+                      <TableHead>Items</TableHead>
                           <TableHead>Preparing Weight</TableHead>
-                          <TableHead>Status</TableHead>
+                      <TableHead>Status</TableHead>
                           <TableHead className="text-right">Revenue</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                         {filteredOrders.map((order, index) => {
                           return (
-                            <TableRow key={`${order.id}-${order.butcherId}-${index}`} className={getOrderRowStyle(order.status)}>
+                      <TableRow key={`${order.id}-${order.butcherId}-${index}`} className={getOrderRowStyle(order.status)}>
                               <TableCell className="font-medium whitespace-nowrap">
-                                {order.id.replace('ORD-', '')}
-                              </TableCell>
+                          {order.id.replace('ORD-', '')}
+                        </TableCell>
                               <TableCell className="whitespace-nowrap">
-                                <Badge variant="outline">
-                                  {order.butcherName || freshButchers.find(b => b.id === order.butcherId)?.name}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
+                          <Badge variant="outline">
+                            {order.butcherName || freshButchers.find(b => b.id === order.butcherId)?.name}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
                                 <div className="max-w-xs space-y-1">
                                   {order.items.map((item, itemIndex) => {
                                     // Extract only English name
@@ -744,15 +744,15 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                                     return (
                                       <div key={itemIndex} className="text-sm">
                                         <span className="font-medium">{englishName}</span>
-                                        <span className="text-muted-foreground ml-1">
-                                          ({item.quantity}{item.unit})
-                                        </span>
-                                      </div>
+                                <span className="text-muted-foreground ml-1">
+                                  ({item.quantity}{item.unit})
+                                </span>
+                              </div>
                                     )
                                   })}
-                                </div>
-                              </TableCell>
-                              <TableCell>
+                          </div>
+                        </TableCell>
+                        <TableCell>
                                 <div className="text-sm space-y-1">
                                   {order.items.map((item, itemIndex) => {
                                     const itemPreparingWeight = getItemPreparingWeight(order, item.name)
@@ -773,13 +773,13 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                                 </div>
                               </TableCell>
                               <TableCell className="whitespace-nowrap">
-                                {getStatusBadge(order.status, order.rejectionReason)}
-                                {order.rejectionReason && (
-                                  <div className="text-xs text-red-600 mt-1">
-                                    {order.rejectionReason}
-                                  </div>
-                                )}
-                              </TableCell>
+                          {getStatusBadge(order.status, order.rejectionReason)}
+                          {order.rejectionReason && (
+                            <div className="text-xs text-red-600 mt-1">
+                              {order.rejectionReason}
+                            </div>
+                          )}
+                        </TableCell>
                               <TableCell className="text-right">
                                 <div className="text-sm space-y-1">
                                   {order.items.map((item, itemIndex) => {
@@ -790,21 +790,21 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                                       <div key={itemIndex} className="text-xs font-medium text-green-600">
                                         <IndianRupee className="h-2.5 w-2.5 inline mr-0.5" />
                                         {englishName}: {itemRevenue.toFixed(2)}
-                                      </div>
+                          </div>
                                     )
                                   })}
                                   {order.items.every(item => getItemRevenue(order, item.name) <= 0) && (
-                                    <span className="text-muted-foreground">-</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                            </TableRow>
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                            </div>
+                        </TableCell>
+                      </TableRow>
                           )
                         })}
-                      </TableBody>
-                    </Table>
-                  </div>
+                  </TableBody>
+                </Table>
                 </div>
+              </div>
               </div>
             </>
           )}

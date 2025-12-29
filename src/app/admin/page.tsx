@@ -46,6 +46,7 @@ import { freshButchers } from "../../lib/butcherConfig"
 import { OrdersAnalytics } from "../../components/admin/OrdersAnalytics"
 import DAMAnalysis from "../../components/admin/DAMAnalysis"
 import { OrdersTab } from "../../components/admin/OrdersTab"
+import { ButcherPerformance } from "../../components/admin/ButcherPerformance"
 import { ThemeToggle } from "../../components/ThemeToggle"
 
 // Helper function to extract order number from full order ID for display
@@ -850,67 +851,12 @@ export default function AdminPage() {
         </TabsContent>
 
         {/* Butchers Tab */}
-            <TabsContent value="butchers" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
-          <Card className="w-full max-w-full">
-            <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg sm:text-xl">Butcher Performance</CardTitle>
-                  <CardDescription className="text-sm mt-1">Individual butcher performance metrics</CardDescription>
-                </div>
-                <Button onClick={fetchAllOrders} disabled={isLoading} variant="outline" size="sm">
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                  {isLoading ? 'Refreshing...' : 'Refresh Orders'}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
-              {isLoading ? (
-                <div className="space-y-4">
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                </div>
-              ) : butcherPerformance.length === 0 ? (
-                <div className="text-center py-12">
-                  <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                  <p className="text-muted-foreground">No butcher performance data available</p>
-                  <p className="text-sm text-muted-foreground mt-2">Click "Refresh Orders" to load data</p>
-                </div>
-              ) : (
-                <div className="w-full overflow-x-auto -mx-4 sm:-mx-6 scrollbar-hide">
-                  <div className="min-w-[600px] px-4 sm:px-6">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Butcher</TableHead>
-                          <TableHead>Total Orders</TableHead>
-                          <TableHead>Completed</TableHead>
-                          <TableHead>Completion Rate</TableHead>
-                          <TableHead className="text-right">Revenue</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {butcherPerformance.map((butcher) => (
-                          <TableRow key={butcher.id}>
-                            <TableCell className="font-medium">{butcher.name}</TableCell>
-                            <TableCell>{butcher.totalOrders}</TableCell>
-                            <TableCell>{butcher.completedOrders}</TableCell>
-                            <TableCell>
-                              <Badge variant={butcher.completionRate >= 80 ? "default" : butcher.completionRate >= 60 ? "secondary" : "destructive"}>
-                                {butcher.completionRate.toFixed(1)}%
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">₹{butcher.revenue.toLocaleString('en-IN')}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        <TabsContent value="butchers" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
+          <ButcherPerformance 
+            allOrders={allOrders} 
+            onRefresh={fetchAllOrders}
+            isLoading={isLoading}
+          />
         </TabsContent>
 
         {/* Orders Tab */}
@@ -1112,7 +1058,7 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           )}
-        </TabsContent>
+            </TabsContent>
           </Tabs>
 
           {/* Confirmation Dialog */}

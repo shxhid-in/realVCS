@@ -1,6 +1,7 @@
 import { getSheetSheetsClient, getPurchasePriceFromMenu } from './sheets';
 import { calculateItemRevenue } from './revenueService';
-import { getCommissionRate, getButcherType, isFishButcher } from './butcherConfig';
+import { getCommissionRate, getButcherType, isFishButcher, getFishItemFullName } from './butcherConfig';
+import type { Order, OrderItem } from './types';
 
 // IST Helper Functions (matching Butcher POS format)
 const getISTDate = (): string => {
@@ -418,6 +419,344 @@ export const getSalesDataFromSheet = async (
   } catch (error) {
     console.error('Error getting sales data from sheet:', error);
     return [];
+  }
+};
+
+// Helper function to parse comma-separated values from sheet
+const parseArrayFromSheet = (str: string): string[] => {
+  return str ? str.split(',').map(item => item.trim()) : [];
+};
+
+// Helper function to parse DD/MM/YYYY date format
+const parseISTDate = (dateStr: string): Date => {
+  if (!dateStr || !dateStr.trim()) {
+    return new Date();
+  }
+  
+  try {
+    // Parse DD/MM/YYYY format
+    if (dateStr.includes('/')) {
+      const parts = dateStr.split(' ');
+      const datePart = parts[0]; // Get date part (DD/MM/YYYY)
+      const [day, month, year] = datePart.split('/');
+      if (day && month && year) {
+        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      }
+    }
+    // Fallback to standard date parsing
+    return new Date(dateStr);
+  } catch (error) {
+    console.warn(`Failed to parse date: ${dateStr}, using current date`);
+    return new Date();
+  }
+};
+
+/**
+ * Get orders from the Sales VCS Sheet for a specific butcher
+ * This function is used by the admin panel to fetch orders from Sales VCS Sheet
+ * Sales VCS Sheet structure: A:J (Order Date, Order No, Items, Quantity, Cut type, Preparing weight, Completion Time, Start time, Status, Revenue)
+ * Note: Sales VCS Sheet does NOT have a Size column (unlike Butcher POS Sheet)
+ */
+export const getOrdersFromSalesSheet = async (butcherId: string): Promise<Order[]> => {
+  try {
+    const spreadsheetId = getSalesSpreadsheetId();
+    
+    if (!spreadsheetId) {
+      throw new Error('SALES_VCS_SPREADSHEET_ID environment variable is not set');
+    }
+
+    const sheets = await getSheetSheetsClient('sales');
+    const butcherName = getButcherName(butcherId);
+    
+    if (!butcherName) {
+      throw new Error(`No butcher name found for butcher: ${butcherId}`);
+    }
+
+    // Get data from the specific butcher's tab
+    // Columns: Order Date | Order No | Items | Quantity | Cut type | Preparing weight | Completion Time | Start time | Status | Revenue
+    // Note: Sales VCS Sheet has A:J (10 columns), no Size column
+    const range = `${butcherName}!A2:J`;
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+    });
+
+    const rows = response.data.values || [];
+    const orders: Order[] = [];
+
+    // Determine butcher type for column structure
+    const isMeat = getButcherType(butcherId) === 'meat';
+    const isFish = getButcherType(butcherId) === 'fish';
+
+    for (const row of rows) {
+      // Sales VCS Sheet structure: A:J (10 columns, no Size)
+      let orderDate, orderNo, items, quantity, cutType, preparingWeight, completionTime, startTime, statusFromSheet, revenueFromSheet;
+      
+      [orderDate, orderNo, items, quantity, cutType, preparingWeight, completionTime, startTime, statusFromSheet, revenueFromSheet] = row;
+      
+      if (!orderNo) continue; // Skip empty rows
+
+      // Parse items, quantities, and cut types
+      const itemNames = parseArrayFromSheet(items || '');
+      const quantities = parseArrayFromSheet(quantity || '');
+      const cutTypes = parseArrayFromSheet(cutType || '');
+      
+      let preparingWeights: string[] = [];
+      const preparingWeightsMap: { [itemName: string]: string } = {};
+      const rejectedItemNames = new Set<string>();
+      const itemWeights: { [itemName: string]: string } = {};
+      const itemQuantities: { [itemName: string]: string } = {};
+
+      // Parse preparing weight column (format: "item: weight" or "item: rejected")
+      if (preparingWeight && preparingWeight.trim()) {
+        const weightStr = preparingWeight.trim();
+        
+        if (weightStr.includes(': ') && weightStr.match(/[a-zA-Z]/)) {
+          // Parse new format: "item: weight" or "item: rejected"
+          const weightParts = weightStr.split(',').map((p: string) => p.trim()).filter((p: string) => p);
+          
+          weightParts.forEach((part: string) => {
+            if (part.includes(': ')) {
+              const colonIndex = part.indexOf(': ');
+              const itemName = part.substring(0, colonIndex).trim();
+              const value = part.substring(colonIndex + 2).trim();
+              
+              if (value.toLowerCase() === 'rejected') {
+                rejectedItemNames.add(itemName);
+              } else {
+                preparingWeightsMap[itemName] = value;
+                // Store in itemWeights or itemQuantities based on butcher type
+                if (isFish) {
+                  itemWeights[itemName] = value;
+                } else {
+                  itemQuantities[itemName] = value;
+                }
+              }
+            }
+          });
+          
+          // Map weights to items by name
+          itemNames.forEach((itemName, index) => {
+            if (preparingWeightsMap[itemName]) {
+              preparingWeights[index] = preparingWeightsMap[itemName];
+            } else if (!rejectedItemNames.has(itemName)) {
+              preparingWeights[index] = quantities[index] || quantities[0] || '';
+            }
+          });
+        } else {
+          // Old format: Comma-separated weights (for backward compatibility)
+          preparingWeights = parseArrayFromSheet(preparingWeight);
+        }
+      }
+      
+      // Fallback for meat butchers if no weights found
+      if (isMeat && (preparingWeights.length === 0 || preparingWeights.every(w => !w || w.trim() === ''))) {
+        preparingWeights = quantities;
+      }
+
+      // Create order items
+      const orderItems: OrderItem[] = itemNames.map((itemName, index) => {
+        const qty = quantities[index] || quantities[0] || '1';
+        const cut = cutTypes[index] || cutTypes[0] || '';
+        
+        // Parse quantity and unit
+        let parsedQty = 1;
+        let unit: 'kg' | 'nos' = 'kg';
+        
+        if (qty.toLowerCase().includes('kg')) {
+          parsedQty = parseFloat(qty.replace(/kg/gi, '').trim()) || 1;
+          unit = 'kg';
+        } else if (qty.toLowerCase().includes('nos')) {
+          parsedQty = parseFloat(qty.replace(/nos/gi, '').trim()) || 1;
+          unit = 'nos';
+        } else {
+          parsedQty = parseFloat(qty) || 1;
+          unit = 'kg'; // default
+        }
+
+        // Convert English name to three-language name for fish butchers
+        let displayName = itemName;
+        if (isFish) {
+          if (itemName.includes(' - ') && itemName.split(' - ').length >= 3) {
+            displayName = itemName;
+          } else {
+            displayName = getFishItemFullName(itemName);
+          }
+        }
+
+        const orderItem: OrderItem = {
+          id: `${orderNo}-${index}`,
+          name: displayName,
+          quantity: parsedQty,
+          unit,
+          cutType: cut || undefined,
+          // Note: Sales VCS Sheet doesn't have Size column, so size is undefined
+        };
+        
+        // Mark item as rejected if found in rejectedItemNames
+        if (rejectedItemNames.has(itemName)) {
+          (orderItem as any).rejected = 'Item rejected';
+        }
+
+        return orderItem;
+      });
+
+      // Determine order status
+      let status: Order['status'] = 'new';
+      let prepStartTime: Date | undefined;
+      let prepEndTime: Date | undefined;
+      let pickedWeight: number | undefined;
+      let revenue: number | undefined;
+      let itemRevenues: { [itemName: string]: number } | undefined;
+      let rejectionReason: string | undefined;
+
+      if (statusFromSheet && statusFromSheet.trim()) {
+        const sheetStatus = statusFromSheet.toLowerCase().trim();
+        
+        if (sheetStatus.includes(' - accepted') || sheetStatus.includes(' - rejected')) {
+          // Item-wise status format
+          const statusParts = sheetStatus.split(',').map((s: string) => s.trim()).filter((s: string) => s);
+          const hasAccepted = statusParts.some((part: string) => part.includes(' - accepted'));
+          const allRejected = statusParts.length > 0 && statusParts.every((part: string) => part.includes(' - rejected'));
+          
+          if (allRejected) {
+            status = 'rejected';
+            const rejectionParts = statusParts
+              .filter((part: string) => part.includes(' - rejected'))
+              .map((part: string) => {
+                const match = part.match(/ - rejected(?: - (.+))?$/);
+                return match && match[1] ? match[1].trim() : '';
+              })
+              .filter((r: string) => r);
+            rejectionReason = rejectionParts.join('; ') || 'Order rejected';
+          } else if (hasAccepted) {
+            status = completionTime && completionTime.trim() ? 'completed' : 'preparing';
+          } else {
+            status = 'new';
+          }
+        } else {
+          // Simple status string
+          switch (sheetStatus) {
+            case 'new':
+              status = 'new';
+              break;
+            case 'accepted':
+            case 'preparing':
+              status = 'preparing';
+              break;
+            case 'ready to pick up':
+            case 'completed':
+              status = 'completed';
+              break;
+            case 'rejected':
+            case 'declined':
+              status = 'rejected';
+              break;
+            default:
+              if (sheetStatus.startsWith('rejected:')) {
+                status = 'rejected';
+                rejectionReason = statusFromSheet.substring(9).trim();
+              } else if (preparingWeight && preparingWeight.trim()) {
+                status = 'completed';
+              } else {
+                status = 'new';
+              }
+          }
+        }
+      } else {
+        // Fallback: Determine status based on available data
+        if (preparingWeight && preparingWeight.trim()) {
+          status = 'completed';
+        } else {
+          status = 'new';
+        }
+      }
+
+      // Set additional properties based on status
+      if (status === 'preparing' || status === 'completed') {
+        prepStartTime = startTime && startTime.trim() ? parseISTDate(startTime) : new Date();
+        pickedWeight = preparingWeights.length > 0 ? preparingWeights.reduce((sum, w) => sum + (parseFloat(w) || 0), 0) : undefined;
+      }
+
+      if (status === 'completed') {
+        // Calculate preparation end time
+        if (completionTime && completionTime.trim() && prepStartTime) {
+          const completionMinutes = parseFloat(completionTime.replace(/[^\d.]/g, ''));
+          if (!isNaN(completionMinutes)) {
+            prepEndTime = new Date(prepStartTime.getTime() + (completionMinutes * 60 * 1000));
+          } else {
+            prepEndTime = new Date();
+          }
+        } else {
+          prepEndTime = new Date();
+        }
+        
+        // Parse revenue from sheet
+        if (revenueFromSheet && revenueFromSheet.trim()) {
+          const revenueStr = revenueFromSheet.trim();
+          const parsedItemRevenues: { [itemName: string]: number } = {};
+          
+          if (revenueStr.includes(': ')) {
+            // New format: "item: revenue, item: revenue"
+            const revenueParts = revenueStr.split(',').map((p: string) => p.trim()).filter((p: string) => p);
+            revenueParts.forEach((part: string) => {
+              const colonIndex = part.indexOf(': ');
+              if (colonIndex > 0) {
+                const itemName = part.substring(0, colonIndex).trim();
+                const revenueValue = parseFloat(part.substring(colonIndex + 2).trim()) || 0;
+                if (revenueValue > 0) {
+                  parsedItemRevenues[itemName] = revenueValue;
+                }
+              }
+            });
+            
+            if (Object.keys(parsedItemRevenues).length > 0) {
+              itemRevenues = parsedItemRevenues;
+              revenue = Object.values(parsedItemRevenues).reduce((sum, rev) => sum + rev, 0);
+            }
+          } else {
+            // Old format: Comma-separated numbers
+            const revenueValues = parseArrayFromSheet(revenueFromSheet)
+              .map((rev: string) => parseFloat(rev) || 0)
+              .filter((rev: number) => rev > 0);
+            if (revenueValues.length > 0) {
+              revenue = revenueValues.reduce((sum, rev) => sum + rev, 0);
+            }
+          }
+        }
+      }
+
+      // Parse order date and create order ID
+      const orderDateObj = parseISTDate(orderDate || '');
+      const orderId = orderNo ? `ORD-${orderDateObj.getFullYear()}-${String(orderDateObj.getMonth() + 1).padStart(2, '0')}-${String(orderDateObj.getDate()).padStart(2, '0')}-${orderNo}` : `ORD-${Date.now()}`;
+
+      // Create order object
+      const order: Order = {
+        id: orderId,
+        customerName: '', // Sales VCS Sheet doesn't have customer name
+        items: orderItems,
+        status,
+        orderTime: orderDateObj,
+        preparationStartTime: prepStartTime,
+        preparationEndTime: prepEndTime,
+        rejectionReason,
+        pickedWeight,
+        revenue,
+        itemWeights: Object.keys(itemWeights).length > 0 ? itemWeights : undefined,
+        itemQuantities: Object.keys(itemQuantities).length > 0 ? itemQuantities : undefined,
+        itemRevenues,
+        butcherId,
+        butcherName: butcherName,
+        _source: 'sheet',
+      };
+
+      orders.push(order);
+    }
+
+    return orders;
+  } catch (error) {
+    console.error(`Error getting orders from Sales VCS sheet for ${butcherId}:`, error);
+    throw error;
   }
 };
 

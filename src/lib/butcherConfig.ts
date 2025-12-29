@@ -239,8 +239,8 @@ export const BUTCHER_CONFIGS: Record<string, ButcherConfig> = {
     type: 'meat',
     categories: ['chicken', 'mutton'],
     commissionRates: {
-      'Chicken': 0.12,
-      'Mutton': 0.12
+      'Chicken': 0.10,
+      'Mutton': 0.10
     },
     markupRates: {
       'Chicken': 0.05,
