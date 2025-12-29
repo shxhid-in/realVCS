@@ -37,9 +37,8 @@ interface PaymentWithLink {
 
 type PaymentSortOption = 'date-desc' | 'date-asc' | 'status-asc' | 'status-desc' | 'amount-desc' | 'amount-asc'
 
-// Cache for payments by date
 const paymentsCache = new Map<string, { data: PaymentWithLink[]; timestamp: number }>()
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const CACHE_DURATION = 5 * 60 * 1000
 
 export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
   ({ selectedDate, onRefresh }, ref) => {
@@ -53,7 +52,6 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
   const [hasFetched, setHasFetched] = useState(false)
 
   const fetchPayments = useCallback(async (forceRefresh = false) => {
-    // Check cache first (unless forcing refresh)
     if (!forceRefresh) {
       const cached = paymentsCache.get(selectedDate)
       if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -79,14 +77,11 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
         });
       }
       
-      // Transform payments to include payment link info
       const paymentsWithLinks: PaymentWithLink[] = (fetchedPayments || []).map((payment: ZohoPayment) => ({
         payment,
-        // Payment link status can be inferred from payment status
         paymentLinkStatus: payment.status === 'succeeded' ? 'paid' : 'active' as const,
       }))
       
-      // Cache the fetched data
       paymentsCache.set(selectedDate, {
         data: paymentsWithLinks,
         timestamp: Date.now()
@@ -286,25 +281,22 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
                   sortedPayments.map((paymentWithLink) => {
                     const { payment } = paymentWithLink
                     
-                    // Parse payment date - handle timestamp (seconds or milliseconds) or ISO string
                     let paymentDate = 'N/A'
                     if (payment.date) {
                       try {
                         let dateObj: Date
                         if (typeof payment.date === 'number') {
-                          // If it's a number, check if it's seconds (less than 10000000000) or milliseconds
                           dateObj = payment.date < 10000000000 
-                            ? new Date(payment.date * 1000) // seconds to milliseconds
-                            : new Date(payment.date) // already milliseconds
+                            ? new Date(payment.date * 1000)
+                            : new Date(payment.date)
                         } else if (typeof payment.date === 'string') {
-                          // Check if it's a numeric string (timestamp)
                           if (/^\d+$/.test(payment.date)) {
                             const timestamp = parseInt(payment.date)
                             dateObj = timestamp < 10000000000 
-                              ? new Date(timestamp * 1000) // seconds to milliseconds
-                              : new Date(timestamp) // already milliseconds
+                              ? new Date(timestamp * 1000)
+                              : new Date(timestamp)
                           } else {
-                            dateObj = new Date(payment.date) // ISO string
+                            dateObj = new Date(payment.date)
                           }
                         } else {
                           dateObj = new Date(payment.date)
@@ -316,21 +308,17 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
                       }
                     }
                     
-                    // Get payment method - try different field names and ensure it's a string
-                    // Payment method might be an object with properties like 'name', 'type', etc.
                     let paymentMethodRaw = (payment as any).payment_method || payment.payment_mode || (payment as any).method
                     
-                    // If it's an object, extract the string value
                     let paymentMethod = 'N/A'
                     if (paymentMethodRaw) {
                       if (typeof paymentMethodRaw === 'object') {
-                        // Try common property names for payment method objects
                         paymentMethod = paymentMethodRaw.name || 
                                        paymentMethodRaw.type || 
                                        paymentMethodRaw.method || 
                                        paymentMethodRaw.payment_method ||
                                        paymentMethodRaw.label ||
-                                       JSON.stringify(paymentMethodRaw) // Fallback to JSON if none found
+                                       JSON.stringify(paymentMethodRaw)
                       } else {
                         paymentMethod = String(paymentMethodRaw)
                       }

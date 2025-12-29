@@ -32,9 +32,8 @@ export interface InvoicesTabRef {
 
 type SortOption = 'date-desc' | 'date-asc' | 'status-asc' | 'status-desc' | 'amount-desc' | 'amount-asc'
 
-// Cache for invoices by date
 const invoicesCache = new Map<string, { data: ZohoInvoice[]; timestamp: number }>()
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const CACHE_DURATION = 5 * 60 * 1000
 
 export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
   ({ selectedDate, onRefresh }, ref) => {
@@ -50,7 +49,6 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
   const [hasFetched, setHasFetched] = useState(false)
 
   const fetchInvoices = useCallback(async (forceRefresh = false) => {
-    // Check cache first (unless forcing refresh)
     if (!forceRefresh) {
       const cached = invoicesCache.get(selectedDate)
       if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -80,22 +78,17 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
         })
       }
       
-      // Cache the fetched data
       invoicesCache.set(selectedDate, {
         data: fetchedInvoices || [],
         timestamp: Date.now()
       })
       
-      // Note: We don't fetch full invoice details here to avoid rate limiting
-      // Line items will be fetched on-demand when user expands a row or clicks on an invoice
-      // The Zoho Books API list endpoint may not include line_items, but we'll handle that gracefully
       setInvoices(fetchedInvoices || [])
       setHasFetched(true)
     } catch (error) {
       console.error('Error fetching invoices:', error)
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch invoices"
       
-      // Check if it's a rate limit error
       if (errorMessage.includes('rate limit') || errorMessage.includes('exceeded')) {
         toast({
           variant: "destructive",
@@ -132,18 +125,15 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
   const toggleInvoiceExpansion = async (invoiceId: string) => {
     const isCurrentlyExpanded = expandedInvoices.has(invoiceId)
     
-    // If expanding and invoice doesn't have line_items, fetch full details
     if (!isCurrentlyExpanded) {
       const invoice = invoices.find(inv => inv.invoice_id === invoiceId)
       if (invoice && (!invoice.line_items || invoice.line_items.length === 0)) {
-        // Check cache first
         if (!invoiceDetailsCache.has(invoiceId)) {
           try {
             const response = await fetch(`/api/zoho/invoices?invoice_id=${invoiceId}`)
             if (response.ok) {
               const { invoice: fullInvoice } = await response.json()
               setInvoiceDetailsCache(prev => new Map(prev).set(invoiceId, fullInvoice))
-              // Update the invoice in the list
               setInvoices(prev => prev.map(inv => 
                 inv.invoice_id === invoiceId ? fullInvoice : inv
               ))

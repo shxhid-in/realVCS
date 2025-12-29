@@ -49,16 +49,13 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     end: format(new Date(), 'yyyy-MM-dd')
   })
 
-  // Filter orders based on butcher and date
   const filteredOrders = useMemo(() => {
     let filtered = allOrders
     
-    // Filter by butcher
     if (selectedButcher) {
       filtered = filtered.filter(order => order.butcherId === selectedButcher)
     }
     
-    // Filter by date
     if (dateFilter === 'today') {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
@@ -76,12 +73,10 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
         return orderDate >= start && orderDate <= end
       })
     }
-    // 'all' filter shows all orders (no additional filtering)
     
     return filtered
   }, [allOrders, selectedButcher, dateFilter, customDateRange])
 
-  // Helper: Parse weight string to kilograms
   const parseWeightToKg = useCallback((weightStr: string): number => {
     if (!weightStr) return 0
     const normalized = weightStr.toLowerCase().trim()
@@ -93,7 +88,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     return parseFloat(normalized) || 0
   }, [])
 
-  // Helper: Get item weight from order
   const getItemWeight = useCallback((order: Order, itemName: string): number => {
     const englishName = extractEnglishName(itemName)
     
@@ -112,7 +106,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     return 0
   }, [parseWeightToKg])
 
-  // Helper: Get item revenue from order
   const getItemRevenue = useCallback((order: Order, itemName: string): number => {
     if (!order.itemRevenues) return 0
     
@@ -135,7 +128,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     return 0
   }, [])
 
-  // Calculate total kilograms
   const totalKilograms = useMemo(() => {
     let totalKg = 0
     
@@ -155,7 +147,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     return totalKg
   }, [filteredOrders, parseWeightToKg])
 
-  // Calculate total revenue
   const totalRevenue = useMemo(() => {
     return filteredOrders.reduce((sum, order) => {
       if (order.itemRevenues) {
@@ -165,13 +156,11 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     }, 0)
   }, [filteredOrders])
 
-  // Calculate average order value
   const averageOrderValue = useMemo(() => {
     if (filteredOrders.length === 0) return 0
     return totalRevenue / filteredOrders.length
   }, [filteredOrders.length, totalRevenue])
 
-  // Calculate completion time helper
   const calculateCompletionTime = useCallback((order: Order): number | null => {
     if (order.completionTime && typeof order.completionTime === 'number') {
       return order.completionTime
@@ -187,7 +176,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     return null
   }, [])
 
-  // Calculate average completion time
   const averageCompletionTime = useMemo(() => {
     const completedOrders = filteredOrders.filter(order => 
       ['completed', 'prepared', 'ready to pick up'].includes(order.status)
@@ -205,7 +193,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     return avg
   }, [filteredOrders, calculateCompletionTime])
 
-  // Completion time trend data for chart
   const completionTimeTrendData = useMemo(() => {
     const completedOrders = filteredOrders.filter(order => 
       ['completed', 'prepared', 'ready to pick up'].includes(order.status)
@@ -234,7 +221,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   }, [filteredOrders, calculateCompletionTime])
 
-  // Most sold items
   const mostSoldItems = useMemo(() => {
     const itemMap = new Map<string, {
       quantity: number
@@ -278,13 +264,11 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .slice(0, 10)
   }, [filteredOrders, getItemWeight, getItemRevenue])
 
-  // Rejection rate
   const rejectionStats = useMemo(() => {
     const rejected = filteredOrders.filter(order => order.status === 'rejected')
     const total = filteredOrders.length
     const rejectionRate = total > 0 ? (rejected.length / total) * 100 : 0
     
-    // Get rejection reasons
     const reasons = new Map<string, number>()
     rejected.forEach(order => {
       const reason = order.rejectionReason || 'No reason provided'
@@ -302,7 +286,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     }
   }, [filteredOrders])
 
-  // Revenue by category
   const revenueByCategory = useMemo(() => {
     const categoryMap = new Map<string, number>()
     let totalRev = 0
@@ -335,7 +318,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .sort((a, b) => b.revenue - a.revenue)
   }, [filteredOrders, getItemRevenue])
 
-  // Peak hours
   const peakHours = useMemo(() => {
     const hourCounts = new Map<number, number>()
     
@@ -351,7 +333,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
     }))
   }, [filteredOrders])
 
-  // Order status breakdown
   const statusBreakdown = useMemo(() => {
     const statusMap = new Map<string, number>()
     
@@ -368,7 +349,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .sort((a, b) => b.count - a.count)
   }, [filteredOrders])
 
-  // Revenue trends over time
   const revenueTrendData = useMemo(() => {
     const dateMap = new Map<string, number>()
     
@@ -391,7 +371,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   }, [filteredOrders])
 
-  // Item-wise revenue contribution
   const itemRevenueContribution = useMemo(() => {
     const itemMap = new Map<string, number>()
     let totalRev = 0
@@ -415,7 +394,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .slice(0, 10)
   }, [filteredOrders, getItemRevenue])
 
-  // Cut type analysis (meat butchers only)
   const cutTypeAnalysis = useMemo(() => {
     if (!selectedButcher || getButcherTypeFromConfig(selectedButcher) !== 'meat') {
       return []
@@ -443,7 +421,6 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
       .sort((a, b) => b.quantity - a.quantity)
   }, [filteredOrders, selectedButcher, getItemRevenue])
 
-  // Price comparison - average prices per item
   const priceComparison = useMemo(() => {
     const itemPriceMap = new Map<string, { totalRevenue: number; totalWeight: number; count: number }>()
     

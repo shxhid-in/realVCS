@@ -41,7 +41,7 @@ export function OrdersTab() {
         <CardHeader className="pb-3 pt-4 px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <CardTitle className="text-lg sm:text-xl">Orders</CardTitle>
+              <CardTitle className="text-lg sm:text-xl">Billing</CardTitle>
               <CardDescription className="text-sm mt-1">
                 View and manage invoices and payments from Zoho
               </CardDescription>

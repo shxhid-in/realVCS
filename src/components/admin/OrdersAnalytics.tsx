@@ -39,11 +39,9 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
   const [selectedButcher, setSelectedButcher] = useState<string>('all')
   const [dateRange, setDateRange] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily')
   
-  // Helper function to get item preparing weight by matching item name
   const getItemPreparingWeight = (order: Order, itemName: string): string => {
     const englishName = extractEnglishName(itemName)
     
-    // Try matching by English name first (sheet stores English names)
     if (order.itemWeights && order.itemWeights[englishName]) {
       return order.itemWeights[englishName]
     }
@@ -51,7 +49,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       return order.itemQuantities[englishName]
     }
     
-    // Try to match by full name (fallback)
     if (order.itemWeights && order.itemWeights[itemName]) {
       return order.itemWeights[itemName]
     }
@@ -59,7 +56,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       return order.itemQuantities[itemName]
     }
     
-    // Try matching all keys by English name (in case sheet has different format)
     if (order.itemWeights) {
       for (const [key, value] of Object.entries(order.itemWeights)) {
         if (extractEnglishName(key) === englishName || key === englishName) {
@@ -75,35 +71,29 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       }
     }
     
-    // Fallback to item quantity
     const item = order.items.find(i => i.name === itemName)
     return item ? `${item.quantity}${item.unit}` : '-'
   }
   
-  // Helper function to get item revenue by matching item name
   const getItemRevenue = (order: Order, itemName: string): number => {
     if (!order.itemRevenues) return 0
     
     const englishName = extractEnglishName(itemName)
     
-    // Try matching by English name first (sheet stores English names)
     if (order.itemRevenues[englishName] !== undefined) {
       return order.itemRevenues[englishName]
     }
     
-    // Try to match by full name (fallback)
     if (order.itemRevenues[itemName] !== undefined) {
       return order.itemRevenues[itemName]
     }
     
-    // Try matching all keys by English name (in case sheet has different format)
     for (const [key, value] of Object.entries(order.itemRevenues)) {
       if (extractEnglishName(key) === englishName || key === englishName) {
         return value
       }
     }
     
-    // Try matching with size suffix (itemName_size)
     const item = order.items.find(i => i.name === itemName)
     if (item && item.size) {
       const englishKey = `${englishName}_${item.size}`
@@ -139,16 +129,13 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     return Array.from(orderMap.values())
   }, [])
 
-  // Filter orders based on selected butcher and date range
   const filterOrders = useCallback(() => {
     let filtered = allOrders
     
-    // Filter by butcher
     if (selectedButcher !== 'all') {
       filtered = filtered.filter(order => order.butcherId === selectedButcher)
     }
     
-    // Filter by date range
     const now = new Date()
     let startDate: Date
     let endDate: Date
@@ -178,33 +165,23 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     
     filtered = filtered.filter(order => {
       const orderDate = new Date(order.orderTime)
-      // Normalize dates to start of day for accurate comparison
       const orderDateStart = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate())
       const startDateStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
       const endDateStart = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate())
       return orderDateStart >= startDateStart && orderDateStart <= endDateStart
     })
     
-    // Remove duplicates by order ID
     const deduplicatedOrders = removeDuplicateOrders(filtered)
     
-    // Sort by order time (newest first)
     deduplicatedOrders.sort((a, b) => new Date(b.orderTime).getTime() - new Date(a.orderTime).getTime())
     
     setFilteredOrders(deduplicatedOrders)
   }, [allOrders, selectedButcher, dateRange, customDateRange])
 
-  // Don't auto-fetch on mount - data loads only on refresh button click
-  // useEffect(() => {
-  //   fetchAllOrders()
-  // }, [])
-
-  // Filter orders when filters or shared data change
   useEffect(() => {
     filterOrders()
   }, [filterOrders])
 
-  // Manual refresh - calls parent refresh function
   const handleRefresh = async () => {
     if (onRefresh) {
       setIsRefreshing(true)
@@ -278,7 +255,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     })
   }
 
-  // Get status badge with color
   const getStatusBadge = (status: string, rejectionReason?: string) => {
     const statusConfig = {
       'new': { color: 'bg-gray-100 text-gray-800', icon: Clock, label: 'New' },
@@ -301,7 +277,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     )
   }
 
-  // Get order row styling based on status
   const getOrderRowStyle = (status: string) => {
     const statusStyles = {
       'new': 'border-l-4 border-l-gray-400',
@@ -316,7 +291,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     return statusStyles[status.toLowerCase() as keyof typeof statusStyles] || statusStyles['new']
   }
 
-  // Calculate summary statistics
   const getSummaryStats = () => {
     const total = filteredOrders.length
     const completed = filteredOrders.filter(o => ['completed', 'prepared', 'ready to pick up'].includes(o.status.toLowerCase())).length
@@ -332,10 +306,8 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
 
   const stats = getSummaryStats()
 
-  // Get purchase price for a single item
   const getPurchasePriceFromMenu = async (butcherId: string, itemName: string, size: string = 'default'): Promise<number> => {
     try {
-      // Import the actual getPurchasePriceFromMenu from sheets.ts which now returns { price, category }
       const { getPurchasePriceFromMenu: getPriceFromMenu } = await import('@/lib/sheets');
       const { price } = await getPriceFromMenu(butcherId, itemName, size);
       return price;
@@ -344,41 +316,31 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     }
   };
 
-  // Calculate revenue based on actual purchase prices from menu
   const calculateOrderRevenue = async (order: Order): Promise<number> => {
-    
-    // Use stored revenue if available
     if (order.revenue) {
       return order.revenue;
     }
     
-    // Use item revenues if available (sum of all item revenues)
     if (order.itemRevenues) {
       const itemRevenueSum = Object.values(order.itemRevenues).reduce((sum, revenue) => sum + revenue, 0);
       return itemRevenueSum;
     }
     
-    
-    // Calculate revenue using actual purchase prices from menu
     let totalRevenue = 0;
     const orderWeight = order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0);
     
     for (const item of order.items) {
       try {
-        // Get size from order item, default to 'default' if not present
         const itemSize = item.size || 'default';
-        // Get purchase price from menu (pass size parameter)
         const purchasePrice = await getPurchasePriceFromMenu(order.butcherId || 'usaj', item.name, itemSize);
         
         if (purchasePrice > 0) {
-          // Distribute weight proportionally based on item quantity
           const totalItemQuantity = order.items.reduce((sum, i) => sum + i.quantity, 0);
           const itemProportion = totalItemQuantity > 0 ? item.quantity / totalItemQuantity : 0;
           const itemWeight = orderWeight * itemProportion;
           const itemRevenue = itemWeight * purchasePrice;
           
           totalRevenue += itemRevenue;
-        } else {
         }
       } catch (error) {
       }
@@ -739,7 +701,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                         <TableCell>
                                 <div className="max-w-xs space-y-1">
                                   {order.items.map((item, itemIndex) => {
-                                    // Extract only English name
                                     const englishName = extractEnglishName(item.name)
                                     return (
                                       <div key={itemIndex} className="text-sm">

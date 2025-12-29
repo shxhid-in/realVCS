@@ -77,9 +77,9 @@ interface ButcherSalesSummary {
 }
 
 interface DAMAnalysisProps {
-  allOrders: Order[]; // Order[] from parent
-  onRefresh?: () => void; // Parent refresh function
-  isLoading?: boolean; // Parent loading state
+  allOrders: Order[];
+  onRefresh?: () => void;
+  isLoading?: boolean;
 }
 
 const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, isLoading: externalIsLoading = false }) => {
@@ -97,7 +97,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
   const isInitialMount = useRef(true);
   const isLoadingRef = useRef(false);
 
-  // Generate month options
   const months = [
     { value: 1, label: 'January' },
     { value: 2, label: 'February' },
@@ -113,36 +112,28 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
     { value: 12, label: 'December' }
   ];
 
-  // Generate year options (current year ± 2)
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
-  // Ensure tabs start from the beginning (scroll to left on mount and after render)
   useEffect(() => {
     const scrollToStart = () => {
       if (tabsListRef.current) {
-        // Use both scrollLeft and scrollTo for maximum compatibility
         tabsListRef.current.scrollLeft = 0;
         tabsListRef.current.scrollTo({ left: 0, behavior: 'auto' });
       }
     };
     
-    // Multiple attempts to ensure scroll happens after DOM is ready
     scrollToStart();
     
-    // Use requestAnimationFrame for next frame
     requestAnimationFrame(() => {
       scrollToStart();
-      // Also try after a short delay
       setTimeout(scrollToStart, 50);
       setTimeout(scrollToStart, 150);
       setTimeout(scrollToStart, 300);
     });
     
-    // Scroll on window resize (mobile orientation changes, etc.)
     window.addEventListener('resize', scrollToStart);
     
-    // Also listen for scroll events to prevent drift
     const handleScroll = () => {
       if (tabsListRef.current && tabsListRef.current.scrollLeft < 0) {
         scrollToStart();
@@ -186,12 +177,10 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
     }
   }, [selectedMonth, selectedYear, toast]);
 
-  // Calculate sales data from allOrders instead of fetching from API
   const calculateSalesDataFromOrders = useCallback(() => {
     try {
       setError(null);
       
-      // Filter orders by selected month/year and status (only completed orders)
       const filteredOrders = allOrders.filter(order => {
         if (order.status !== 'completed') return false;
         
@@ -204,17 +193,14 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
         const orderDate = new Date(order.orderTime);
         const orderDateStr = `${String(orderDate.getDate()).padStart(2, '0')}/${String(orderDate.getMonth() + 1).padStart(2, '0')}/${orderDate.getFullYear()}`;
         
-        // Extract order number from order ID
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = orderIdParts[orderIdParts.length - 1] || '';
         
-        // Format items, quantities, sizes, cut types, preparing weights
         const items = order.items.map(item => item.name).join(', ');
         const quantities = order.items.map(item => `${item.quantity}${item.unit || 'kg'}`).join(', ');
         const sizes = order.items.map(item => item.size || 'default').join(', ');
         const cutTypes = order.items.map(item => item.cutType || '').join(', ');
         
-        // Preparing weights: use itemWeights (fish) or itemQuantities (meat)
         const isFishButcher = ['kak', 'ka_sons', 'alif','test_fish'].includes(order.butcherId || '');
         const preparingWeights = order.items.map(item => {
           const weight = isFishButcher 
@@ -223,7 +209,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
           return `${item.name}: ${weight}`;
         }).join(', ');
         
-        // Completion time
         let completionTime = '';
         if (order.preparationStartTime && order.preparationEndTime) {
           const start = toDate(order.preparationStartTime);
@@ -234,7 +219,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
           }
         }
         
-        // Start time
         const startTime = order.preparationStartTime 
           ? new Date(order.preparationStartTime).toLocaleString('en-GB', { 
               day: '2-digit', 
@@ -247,44 +231,29 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
             }).replace(',', '')
           : '';
         
-        // Sales Revenue: Calculate from item revenues (selling price total before commission)
-        // Butcher revenue = sales revenue * (1 - commission rate)
-        // So sales revenue = butcher revenue / (1 - commission rate)
         let salesRevenue = 0;
         if (order.itemRevenues && order.items.length > 0) {
-          // Calculate sales revenue per item using actual commission rates
           order.items.forEach(item => {
             const itemButcherRevenue = order.itemRevenues![item.name] || 0;
             if (itemButcherRevenue > 0) {
-              // Get the actual commission rate for this item
               const itemCategory = item.category || 'default';
               const commissionRate = getCommissionRate(order.butcherId || '', itemCategory);
               
-              // If commission rate is 0 or invalid, log error and skip this item
               if (commissionRate <= 0 || commissionRate >= 1) {
                 console.error(`[DAM Analysis] Invalid commission rate for order ${order.id}, item ${item.name}, butcher ${order.butcherId}, category ${itemCategory}. Commission rate: ${commissionRate}. Setting revenue to 0 for this item.`);
-                // Skip this item - don't add to salesRevenue
                 return;
               }
               
-              // Reverse calculate: Sales Revenue = Butcher Revenue / (1 - Commission Rate)
               const itemSalesRevenue = itemButcherRevenue / (1 - commissionRate);
               salesRevenue += itemSalesRevenue;
             }
           });
         } else if (order.revenue && order.revenue > 0) {
-          // If no itemRevenues, we need item-level data to calculate properly
-          // Log error and set to 0
           console.error(`[DAM Analysis] Missing itemRevenues for order ${order.id}, butcher ${order.butcherId}. Cannot calculate accurate sales revenue. Setting to 0.`);
           salesRevenue = 0;
         }
         
-        // Butcher Revenue: This is what the butcher gets (after commission)
         const butcherRevenue = order.revenue || 0;
-        
-        // Margin: Sales Revenue - Butcher Revenue (company's profit)
-        // If salesRevenue is 0 due to missing data, margin will be negative (butcher revenue - 0)
-        // This is intentional to show that data is incomplete
         const margin = salesRevenue > 0 ? salesRevenue - butcherRevenue : 0;
         
         return {
@@ -308,7 +277,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
 
       setSalesData(calculatedSalesData);
       
-      // Calculate butcher summary
       const butcherMap = new Map<string, ButcherSalesSummary>();
       
       calculatedSalesData.forEach(sale => {
@@ -340,10 +308,8 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
     }
   }, [allOrders, selectedMonth, selectedYear]);
 
-  // Calculate weekly targets from sales data
   const calculateWeeklyTargets = useCallback((salesData: SalesData[]) => {
     if (!monthlyTarget) {
-      // If no target set, create empty weekly targets
       setWeeklyTargets([
         { week: 1, target: 0, achieved: 0, percentage: 0, status: 'pending' },
         { week: 2, target: 0, achieved: 0, percentage: 0, status: 'pending' },
@@ -356,15 +322,13 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
     const weeklyTarget = monthlyTarget.totalTarget / 4;
     const weeklyAchieved: { [week: number]: number } = { 1: 0, 2: 0, 3: 0, 4: 0 };
     
-    // Calculate achieved sales per week
     salesData.forEach(sale => {
       const orderDate = new Date(sale.orderDate.split('/').reverse().join('-'));
       const week = Math.ceil(orderDate.getDate() / 7);
-      const weekNum = Math.min(week, 4); // Cap at week 4
+      const weekNum = Math.min(week, 4);
       weeklyAchieved[weekNum] += sale.salesRevenue;
     });
     
-    // Create weekly targets
     const weeklyTargetsData: WeeklyTarget[] = [1, 2, 3, 4].map(week => {
       const achieved = weeklyAchieved[week];
       const percentage = weeklyTarget > 0 ? (achieved / weeklyTarget) * 100 : 0;
@@ -385,26 +349,21 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
     setWeeklyTargets(weeklyTargetsData);
   }, [monthlyTarget]);
 
-  // Calculate sales data when orders or month/year changes
   useEffect(() => {
     calculateSalesDataFromOrders();
   }, [calculateSalesDataFromOrders]);
 
-  // Calculate weekly targets when sales data or monthly target changes
   useEffect(() => {
     if (salesData.length > 0 || monthlyTarget) {
       calculateWeeklyTargets(salesData);
     }
   }, [salesData, monthlyTarget, calculateWeeklyTargets]);
 
-  // Load monthly target when month/year changes
   useEffect(() => {
     loadMonthlyTarget();
   }, [selectedMonth, selectedYear, loadMonthlyTarget]);
 
-  // Handle refresh button click
   const handleRefresh = useCallback(async () => {
-    // Refresh orders from parent if available
     if (onRefresh) {
       setIsLoading(true);
       try {
@@ -414,7 +373,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
       }
     }
     
-    // Also refresh monthly target
     await loadMonthlyTarget();
   }, [onRefresh, loadMonthlyTarget]);
 
@@ -499,7 +457,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
     return 'bg-red-500';
   };
 
-  // Calculate performance insights
   const getPerformanceInsights = () => {
     if (!monthlyTarget) return [];
 
@@ -512,7 +469,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
 
     const insights = [];
 
-    // Target achievement insight
     if (totalSales === 0) {
       insights.push({
         type: 'info',
@@ -543,7 +499,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
       });
     }
 
-    // Margin insight
     if (marginPercentage >= 20) {
       insights.push({
         type: 'success',
@@ -567,7 +522,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
       });
     }
 
-    // Order volume insight
     if (totalOrders > 0) {
       const avgOrdersPerDay = totalOrders / new Date(selectedYear, selectedMonth, 0).getDate();
       if (avgOrdersPerDay >= 10) {
@@ -594,7 +548,6 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
       }
     }
 
-    // Top performer insight
     if (butcherSummary.length > 0) {
       const topPerformer = butcherSummary.reduce((max, butcher) => 
         butcher.totalSales > max.totalSales ? butcher : max, butcherSummary[0]);

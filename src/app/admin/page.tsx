@@ -48,7 +48,6 @@ import { OrdersTab } from "../../components/admin/OrdersTab"
 import { ButcherPerformance } from "../../components/admin/ButcherPerformance"
 import { ThemeToggle } from "../../components/ThemeToggle"
 
-// Helper function to extract order number from full order ID for display
 const getDisplayOrderId = (orderId: string): string => {
   const orderIdParts = orderId.replace('ORD-', '').split('-');
   const orderNumber = orderIdParts[orderIdParts.length - 1];
@@ -71,7 +70,6 @@ export default function AdminPage() {
   const { toast } = useToast();
   const { clear: clearCache } = useClientCache();
   
-  // State management
   const [selectedButcher, setSelectedButcher] = useState<string>('all');
   const [timeFrame, setTimeFrame] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
   const [customDateRange, setCustomDateRange] = useState<{start: string, end: string}>({
@@ -93,45 +91,35 @@ export default function AdminPage() {
   const [pollingEnabled, setPollingEnabled] = useState(true);
   const tabsListRef = useRef<HTMLDivElement>(null);
 
-  // Redirect if not admin (with proper loading check)
   useEffect(() => {
-    // Don't redirect if auth is still loading
     if (admin === undefined && !isAdmin) {
       return;
     }
     
-    // Only redirect if we're sure the user is not an admin
     if (!isAdmin && admin === null) {
       window.location.href = '/';
     }
   }, [isAdmin, admin]);
 
-  // Ensure tabs start from the beginning (scroll to left on mount and after render)
   useEffect(() => {
     const scrollToStart = () => {
       if (tabsListRef.current) {
-        // Use both scrollLeft and scrollTo for maximum compatibility
         tabsListRef.current.scrollLeft = 0;
         tabsListRef.current.scrollTo({ left: 0, behavior: 'auto' });
       }
     };
     
-    // Multiple attempts to ensure scroll happens after DOM is ready
     scrollToStart();
     
-    // Use requestAnimationFrame for next frame
     requestAnimationFrame(() => {
       scrollToStart();
-      // Also try after a short delay
       setTimeout(scrollToStart, 50);
       setTimeout(scrollToStart, 150);
       setTimeout(scrollToStart, 300);
     });
     
-    // Scroll on window resize (mobile orientation changes, etc.)
     window.addEventListener('resize', scrollToStart);
     
-    // Also listen for scroll events to prevent drift
     const handleScroll = () => {
       if (tabsListRef.current && tabsListRef.current.scrollLeft < 0) {
         scrollToStart();
@@ -150,10 +138,8 @@ export default function AdminPage() {
     };
   }, []);
 
-  // Helper function to delay between API calls (rate limiting)
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  // Fetch orders for all butchers from sheets (not cache) with rate limiting
   const fetchAllOrders = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -166,21 +152,15 @@ export default function AdminPage() {
       const butcherIds = freshButchers.map(b => b.id);
       const allOrdersData: Order[] = [];
 
-      // Rate limiting: Add delay between requests to avoid quota errors
-      // Google Sheets API limit: 100 requests per minute per user
-      // We'll add 600ms delay between requests = ~100 requests per minute max
-      const DELAY_BETWEEN_REQUESTS = 600; // 600ms = ~100 requests/minute
+      const DELAY_BETWEEN_REQUESTS = 600;
 
-      // Fetch all orders from sheets for each butcher (with pagination and rate limiting)
       for (let i = 0; i < butcherIds.length; i++) {
         const butcherId = butcherIds[i];
         try {
           let page = 1;
           let hasMore = true;
 
-          // Fetch all pages sequentially with rate limiting
           while (hasMore) {
-            // Add delay before each request (except the first one)
             if (page > 1 || i > 0) {
               await delay(DELAY_BETWEEN_REQUESTS);
             }
@@ -269,7 +249,6 @@ export default function AdminPage() {
     }
   }, [toast]);
 
-  // Fetch support requests
   const fetchSupportRequests = useCallback(async (isManualRefresh = false) => {
     try {
       if (isManualRefresh) {
@@ -307,7 +286,6 @@ export default function AdminPage() {
     fetchSupportRequests(true);
   };
 
-  // Handle admin response to support request
   const handleAdminResponse = async (requestId: string, status: string) => {
     setIsResponding(true);
     try {
@@ -330,7 +308,7 @@ export default function AdminPage() {
         });
         setAdminResponse('');
         setSelectedRequest(null);
-        fetchSupportRequests(); // Refresh the list
+        fetchSupportRequests();
       } else {
         throw new Error('Failed to send response');
       }
@@ -346,13 +324,11 @@ export default function AdminPage() {
     }
   };
 
-  // Handle delete click
   const handleDeleteClick = (requestId: string) => {
     setRequestToDelete(requestId);
     setDeleteDialogOpen(true);
   };
 
-  // Confirm delete
   const confirmDelete = async () => {
     if (!requestToDelete) return;
 
@@ -368,14 +344,11 @@ export default function AdminPage() {
           description: "Support request has been deleted successfully.",
         });
         
-        // Immediately remove from local state for instant UI update
         setSupportRequests(prev => prev.filter(req => req.id !== requestToDelete));
         
-        // Close the dialog
         setDeleteDialogOpen(false);
         setRequestToDelete(null);
         
-        // Then refresh from server to ensure consistency
         setTimeout(() => {
           fetchSupportRequests();
         }, 500);
@@ -407,29 +380,25 @@ export default function AdminPage() {
       fetchAllOrders();
       fetchSupportRequests();
     }
-  }, [isAdmin]); // Remove function dependencies to prevent infinite loop
+  }, [isAdmin]);
 
-  // Poll for support requests updates every 30 seconds
   useEffect(() => {
     if (!isAdmin || !pollingEnabled) return;
 
     const interval = setInterval(() => {
       fetchSupportRequests();
-    }, 30000); // Poll every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [isAdmin, pollingEnabled]); // Keep these dependencies as they're stable
+  }, [isAdmin, pollingEnabled]);
 
-  // Filter orders based on selected butcher and time frame
   const getFilteredOrders = () => {
     let filtered = allOrders;
     
-    // Filter by butcher
     if (selectedButcher !== 'all') {
       filtered = filtered.filter(order => order.butcherId === selectedButcher);
     }
     
-    // Filter by time frame
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
@@ -437,7 +406,6 @@ export default function AdminPage() {
       case 'daily':
         filtered = filtered.filter(order => {
           const orderDate = new Date(order.orderTime);
-          // Set time to start of day for accurate comparison
           const orderDateStart = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
           const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
           return orderDateStart.getTime() === todayStart.getTime();
@@ -478,9 +446,7 @@ export default function AdminPage() {
   const rejectedOrders = filteredOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
   const preparingOrders = filteredOrders.filter(o => o.status === 'preparing');
 
-  // Calculate analytics
   const totalRevenue = completedOrders.reduce((acc, order) => {
-    // Use itemRevenues if available, otherwise fallback to order.revenue
     if (order.itemRevenues) {
       return acc + Object.values(order.itemRevenues).reduce((sum, rev) => sum + rev, 0);
     }
@@ -488,17 +454,15 @@ export default function AdminPage() {
   }, 0);
   const totalOrders = filteredOrders.length;
   
-  // Calculate most ordered item with total quantity
   const itemQuantityMap = new Map<string, { quantity: number; unit: string }>();
   filteredOrders.forEach(order => {
     order.items.forEach(item => {
       const englishName = extractEnglishName(item.name);
       const existing = itemQuantityMap.get(englishName) || { quantity: 0, unit: item.unit };
       
-      // Convert to kg for comparison (g -> kg, nos stays as is)
       let quantityToAdd = item.quantity;
       if (item.unit === 'g') {
-        quantityToAdd = item.quantity / 1000; // Convert grams to kg
+        quantityToAdd = item.quantity / 1000;
         existing.unit = 'kg';
       } else if (item.unit === 'nos') {
         existing.unit = 'nos';
@@ -515,13 +479,11 @@ export default function AdminPage() {
     .map(([name, data]) => ({ name, quantity: data.quantity, unit: data.unit }))
     .sort((a, b) => b.quantity - a.quantity)[0] || null;
 
-  // Butcher performance data for table
   const butcherPerformance = freshButchers.map(butcher => {
     const butcherOrders = filteredOrders.filter(o => o.butcherId === butcher.id);
     const completed = butcherOrders.filter(o => ['completed', 'prepared', 'ready to pick up'].includes(o.status));
     const rejected = butcherOrders.filter(o => o.status === 'rejected' || o.rejectionReason);
     const revenue = completed.reduce((acc, order) => {
-      // Use itemRevenues if available, otherwise fallback to order.revenue
       if (order.itemRevenues) {
         return acc + Object.values(order.itemRevenues).reduce((sum, rev) => sum + rev, 0);
       }
@@ -536,9 +498,8 @@ export default function AdminPage() {
       rejectedOrders: rejected.length,
       revenue
     };
-  }).filter(butcher => butcher.totalOrders > 0); // Only show butchers with orders
+  }).filter(butcher => butcher.totalOrders > 0);
 
-  // Chart data
   const revenueChartData = butcherPerformance.map(butcher => ({
     name: butcher.name,
     revenue: butcher.revenue,
@@ -614,8 +575,8 @@ export default function AdminPage() {
                 <span>Overview</span>
               </TabsTrigger>
               <TabsTrigger value="orders" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
-                <ShoppingBag className="h-4 w-4 flex-shrink-0" />
-                <span>Orders</span>
+                <FileText className="h-4 w-4 flex-shrink-0" />
+                <span>Billing</span>
               </TabsTrigger>
               <TabsTrigger value="butchers" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
                 <Users className="h-4 w-4 flex-shrink-0" />
@@ -916,7 +877,7 @@ export default function AdminPage() {
           />
         </TabsContent>
 
-        {/* Orders Tab */}
+        {/* Billing Tab */}
             <TabsContent value="orders" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           <OrdersTab />
         </TabsContent>
