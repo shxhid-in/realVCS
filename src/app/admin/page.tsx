@@ -627,12 +627,14 @@ export default function AdminPage() {
               </TabsTrigger>
               <TabsTrigger value="dam-analysis" className="flex items-center gap-2 whitespace-nowrap px-3 sm:px-4 flex-shrink-0 min-w-fit">
                 <Target className="h-4 w-4 flex-shrink-0" />
-                <span className="hidden sm:inline">D.A.M Analysis</span>
-                <span className="sm:hidden">D.A.M</span>
+                <span>Target</span>
               </TabsTrigger>
-              <TabsTrigger value="support" className="flex items-center gap-2 whitespace-nowrap pl-3 pr-4 sm:px-4 flex-shrink-0 min-w-fit">
+              <TabsTrigger value="support" className="flex items-center gap-2 whitespace-nowrap pl-3 pr-4 sm:px-4 flex-shrink-0 min-w-fit relative">
                 <MessageSquare className="h-4 w-4 flex-shrink-0" />
                 <span>Support</span>
+                {supportRequests.filter(req => req.status === 'pending').length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse z-10"></span>
+                )}
               </TabsTrigger>
             </TabsList>
 
@@ -928,7 +930,7 @@ export default function AdminPage() {
           />
         </TabsContent>
 
-        {/* D.A.M Analysis Tab */}
+        {/* Target Tab */}
             <TabsContent value="dam-analysis" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
           <DAMAnalysis 
             allOrders={allOrders} 

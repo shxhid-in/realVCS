@@ -30,6 +30,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import type { Order } from '@/lib/types';
 import { toDate } from '@/lib/utils';
+import { getCommissionRate, extractEnglishName } from '@/lib/butcherConfig';
 
 interface WeeklyTarget {
   week: number;
@@ -246,26 +247,45 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
             }).replace(',', '')
           : '';
         
-        // Sales Revenue: Calculate from item revenues (selling price total)
-        // If itemRevenues exists, sum them up. Otherwise, use order.revenue as approximation
+        // Sales Revenue: Calculate from item revenues (selling price total before commission)
+        // Butcher revenue = sales revenue * (1 - commission rate)
+        // So sales revenue = butcher revenue / (1 - commission rate)
         let salesRevenue = 0;
-        if (order.itemRevenues) {
-          salesRevenue = Object.values(order.itemRevenues).reduce((sum: number, rev: number) => sum + rev, 0);
-          // Sales revenue should be before commission, so we need to reverse the calculation
-          // Butcher revenue = sales revenue * (1 - commission)
-          // So sales revenue = butcher revenue / (1 - commission)
-          // For now, we'll approximate: sales revenue ≈ butcher revenue * 1.15 (assuming ~13% commission)
-          salesRevenue = salesRevenue * 1.15; // Approximate sales revenue
-        } else if (order.revenue) {
-          // If no itemRevenues, estimate sales revenue from butcher revenue
-          salesRevenue = order.revenue * 1.15; // Approximate
+        if (order.itemRevenues && order.items.length > 0) {
+          // Calculate sales revenue per item using actual commission rates
+          order.items.forEach(item => {
+            const itemButcherRevenue = order.itemRevenues![item.name] || 0;
+            if (itemButcherRevenue > 0) {
+              // Get the actual commission rate for this item
+              const itemCategory = item.category || 'default';
+              const commissionRate = getCommissionRate(order.butcherId || '', itemCategory);
+              
+              // If commission rate is 0 or invalid, log error and skip this item
+              if (commissionRate <= 0 || commissionRate >= 1) {
+                console.error(`[DAM Analysis] Invalid commission rate for order ${order.id}, item ${item.name}, butcher ${order.butcherId}, category ${itemCategory}. Commission rate: ${commissionRate}. Setting revenue to 0 for this item.`);
+                // Skip this item - don't add to salesRevenue
+                return;
+              }
+              
+              // Reverse calculate: Sales Revenue = Butcher Revenue / (1 - Commission Rate)
+              const itemSalesRevenue = itemButcherRevenue / (1 - commissionRate);
+              salesRevenue += itemSalesRevenue;
+            }
+          });
+        } else if (order.revenue && order.revenue > 0) {
+          // If no itemRevenues, we need item-level data to calculate properly
+          // Log error and set to 0
+          console.error(`[DAM Analysis] Missing itemRevenues for order ${order.id}, butcher ${order.butcherId}. Cannot calculate accurate sales revenue. Setting to 0.`);
+          salesRevenue = 0;
         }
         
         // Butcher Revenue: This is what the butcher gets (after commission)
         const butcherRevenue = order.revenue || 0;
         
-        // Margin: Sales Revenue - Butcher Revenue
-        const margin = salesRevenue - butcherRevenue;
+        // Margin: Sales Revenue - Butcher Revenue (company's profit)
+        // If salesRevenue is 0 due to missing data, margin will be negative (butcher revenue - 0)
+        // This is intentional to show that data is incomplete
+        const margin = salesRevenue > 0 ? salesRevenue - butcherRevenue : 0;
         
         return {
           orderId: order.id,
@@ -1249,29 +1269,47 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-6">
-                {getImprovementRecommendations().map((rec, index) => (
-                  <div key={index} className="p-4 border rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 rounded-lg bg-blue-100 text-blue-600">
-                        {rec.icon}
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-lg mb-2">{rec.title}</h3>
-                        <p className="text-muted-foreground mb-3">{rec.description}</p>
-                        <ul className="space-y-1">
-                          {rec.actions.map((action, actionIndex) => (
-                            <li key={actionIndex} className="flex items-center gap-2 text-sm">
-                              <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                              {action}
-                            </li>
-                          ))}
-                        </ul>
+              {!monthlyTarget ? (
+                <div className="text-center py-8">
+                  <Target className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground mb-2">No monthly target set</p>
+                  <p className="text-sm text-muted-foreground">
+                    Set a monthly target in the "Target Setting" tab to get personalized recommendations.
+                  </p>
+                </div>
+              ) : getImprovementRecommendations().length === 0 ? (
+                <div className="text-center py-8">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-500 opacity-50" />
+                  <p className="text-muted-foreground">All targets are on track!</p>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Keep up the great work. Continue monitoring your performance.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {getImprovementRecommendations().map((rec, index) => (
+                    <div key={index} className="p-4 border rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
+                          {rec.icon}
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-lg mb-2">{rec.title}</h3>
+                          <p className="text-muted-foreground mb-3">{rec.description}</p>
+                          <ul className="space-y-1">
+                            {rec.actions.map((action, actionIndex) => (
+                              <li key={actionIndex} className="flex items-center gap-2 text-sm">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                {action}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
