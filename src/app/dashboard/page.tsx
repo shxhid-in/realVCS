@@ -32,8 +32,10 @@ function needsWeightDialog(itemName: string): boolean {
     const itemNameLower = itemName.toLowerCase();
     return itemNameLower.includes('chicken nadan') || 
            itemNameLower.includes('chicken thigh') ||
+           itemNameLower.includes('chicken with skin') ||
            itemNameLower.includes('nadan') ||
-           itemNameLower.includes('thigh');
+           itemNameLower.includes('thigh') ||
+           itemNameLower.includes('with skin');
 }
 
 // Helper function to check if an item needs weight entry
