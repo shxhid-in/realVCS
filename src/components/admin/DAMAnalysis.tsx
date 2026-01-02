@@ -1239,29 +1239,29 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
                   </p>
                 </div>
               ) : (
-                <div className="space-y-6">
-                  {getImprovementRecommendations().map((rec, index) => (
-                    <div key={index} className="p-4 border rounded-lg">
-                      <div className="flex items-start gap-3">
+              <div className="space-y-6">
+                {getImprovementRecommendations().map((rec, index) => (
+                  <div key={index} className="p-4 border rounded-lg">
+                    <div className="flex items-start gap-3">
                         <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
-                          {rec.icon}
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-lg mb-2">{rec.title}</h3>
-                          <p className="text-muted-foreground mb-3">{rec.description}</p>
-                          <ul className="space-y-1">
-                            {rec.actions.map((action, actionIndex) => (
-                              <li key={actionIndex} className="flex items-center gap-2 text-sm">
-                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                                {action}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
+                        {rec.icon}
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-lg mb-2">{rec.title}</h3>
+                        <p className="text-muted-foreground mb-3">{rec.description}</p>
+                        <ul className="space-y-1">
+                          {rec.actions.map((action, actionIndex) => (
+                            <li key={actionIndex} className="flex items-center gap-2 text-sm">
+                              <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                              {action}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
+              </div>
               )}
             </CardContent>
           </Card>

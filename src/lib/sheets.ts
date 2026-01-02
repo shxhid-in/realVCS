@@ -1459,16 +1459,24 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         const orderIdParts = order.id.replace('ORD-', '').split('-');
         const orderNo = parseInt(orderIdParts[orderIdParts.length - 1], 10); // Get the last part as number
         
-        // Order Date: Always use today's date in IST
-        const orderDate = getISTDate();
+        // Order Date: Use the actual order date from order.orderTime, not today's date
+        // Convert order.orderTime to IST date string (DD/MM/YYYY format) to match sheet format
+        const orderDate = order.orderTime 
+            ? (() => {
+                const date = new Date(order.orderTime);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            })()
+            : getISTDate(); // Fallback to today if orderTime is not available
         
         // Determine butcher type for column structure
         const isMeat = isMeatButcher(butcherId);
         
-        // Different column structures based on butcher type
-        // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
-        // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns)
-        const range = isMeat ? `${tabName}!A2:F` : `${tabName}!A2:G`;
+        // Butcher POS Sheet structure: A2:K (11 columns)
+        // Order Date | Order No | Items | Quantity | Size | Cut type | Preparing weight | Completion Time | Start time | Status | Revenue
+        const range = `${tabName}!A2:K`;
         const response = await measureApiCall(
             `findOrder:${butcherId}`,
             'GET',
@@ -1701,11 +1709,35 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             revenueForSheet = '';
         }
 
-        // Update the specific row - both meat and fish butchers have same column structure
-        // columns G, H, I, J, K (preparing weight, completion time, start time, status, revenue)
-        // Note: Size column is now at position 5 (F), so preparing weight moved to position 6 (G)
-        const updateRange = `${tabName}!G${rowIndex}:K${rowIndex}`;
-        const updateValues = [[preparingWeight, completionTime, startTime, sheetStatus, revenueForSheet]];
+        const items = formatArrayForSheet(order.items.map(item => item.name));
+        const quantities = formatArrayForSheet(order.items.map(item => `${item.quantity}${item.unit}`));
+        const sizes = formatArrayForSheet(order.items.map(item => item.size || ''));
+        const cutTypes = formatArrayForSheet(order.items.map(item => item.cutType || ''));
+        
+        const orderDateForSheet = order.orderTime 
+            ? (() => {
+                const date = new Date(order.orderTime);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            })()
+            : getISTDate();
+        
+        const updateRange = `${tabName}!A${rowIndex}:K${rowIndex}`;
+        const updateValues = [[
+            orderDateForSheet,  // A: Order Date
+            orderNo,            // B: Order No
+            items,              // C: Items
+            quantities,         // D: Quantity
+            sizes,              // E: Size
+            cutTypes,           // F: Cut type
+            preparingWeight,   // G: Preparing weight
+            completionTime,     // H: Completion Time
+            startTime,          // I: Start time
+            sheetStatus,        // J: Status
+            revenueForSheet     // K: Revenue
+        ]];
         
         const updateResponse = await measureApiCall(
             `updateOrder:${butcherId}`,
@@ -1738,7 +1770,6 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             itemQuantities: order.itemQuantities
         });
         
-        // Provide more specific error messages
         if (error.message?.includes('not configured')) {
             throw new Error(`Google Sheets configuration error: ${error.message}`);
         } else if (error.message?.includes('not found')) {
@@ -1765,8 +1796,6 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
         const sheets = await getButcherSheetsClient(butcherId);
         const butcherType = getButcherType(butcherId);
         
-        // For mixed butchers, determine tab from first category
-        // For meat/fish butchers, use BUTCHER_TABS
         let tabName: string | null = null;
         if (butcherType === 'mixed') {
             if (menu.length > 0) {
@@ -1783,18 +1812,15 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             }
         }
 
-        // Determine butcher type
         const isMeatButcher = butcherType === 'meat' || (butcherType === 'mixed' && menu.length > 0 && getItemTypeFromCategory(menu[0].name) === 'meat');
         const isFishButcher = butcherType === 'fish' || (butcherType === 'mixed' && menu.length > 0 && getItemTypeFromCategory(menu[0].name) === 'fish');
         
-        // Clear existing data
         const clearRange = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
             await sheets.spreadsheets.values.clear({
                 spreadsheetId: MENU_POS_SHEET_ID,
                 range: clearRange,
             });
 
-        // Prepare data
         const rows: any[][] = [];
         const currentDate = new Date().toLocaleDateString('en-GB'); // DD/MM/YYYY format
         
@@ -1805,26 +1831,19 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
                 for (const size of item.sizes) {
                     if (size.price <= 0) continue;
 
-                    // Extract English name for fish items
                     let itemName = item.name;
                     if (item.name.includes(' - ') && item.name.split(' - ').length >= 3) {
                         const nameParts = item.name.split(' - ');
                         itemName = nameParts[1].trim(); // Extract English name
                     }
                     
-                    // No longer adding "meat" suffix for fish butchers' steak fish items
-                    // Fish butchers will use the original item names without suffix
-                    
-                    // Calculate selling price with markup based on category from butcherConfig
                     const categoryName = category.name;
                     const markupRate = getMarkupRate(butcherId, categoryName);
                     const sellingPrice = Math.round(size.price * (1 + markupRate));
                     
-                    // Prepare row data
                     const row: any[] = [];
                     
                     if (isMeatButcher) {
-                        // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight | Date
                         row.push(
                             itemName,
                             category.name,
@@ -1835,7 +1854,6 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
                             currentDate
                         );
                     } else {
-                        // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight | Date
                         row.push(
                             itemName,
                             category.name,
@@ -1853,7 +1871,6 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             }
         }
 
-        // Write to sheet
         if (rows.length > 0) {
             const range = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
             await sheets.spreadsheets.values.update({
@@ -1866,7 +1883,6 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             });
         }
 
-        // Notify Central API about menu update (non-blocking)
         try {
             const { centralAPIClient } = await import('./centralAPIClient');
             const { getButcherNameFromId } = await import('./butcherMapping');
@@ -1875,7 +1891,6 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
             
             const butcherName = getButcherNameFromId(butcherId) || butcherId;
             
-            // Determine menu type for mixed butchers
             let menuType: 'meat' | 'fish' | undefined = undefined;
             if (isMixedButcher(butcherId) && menu.length > 0) {
                 const firstCategory = menu[0];
@@ -1885,17 +1900,14 @@ export const saveMenuToSheet = async (butcherId: string, menu: MenuCategory[]): 
                 }
             }
             
-            // Attempt to notify Central API
             try {
                 await centralAPIClient.notifyMenuUpdate(butcherId, butcherName, menuType);
                 console.log(`[Menu] Updated: ${butcherName}${menuType ? ` (${menuType})` : ''}`);
             } catch (error: any) {
-                // If notification fails, queue it for retry
                 console.warn(`[Menu] Failed to notify Central API, queuing for retry:`, error.message);
                 queueMenuUpdate(butcherId, butcherName, menuType);
             }
         } catch (error: any) {
-            // Log but don't fail menu save if notification setup fails
             console.error('Error setting up menu update notification:', error);
         }
 
@@ -1916,14 +1928,12 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
 
         const sheets = await getButcherSheetsClient(butcherId);
         
-        // Use override tab name if provided (for mixed butchers), otherwise use BUTCHER_TABS
         let tabName: string | null = null;
         if (tabNameOverride) {
             tabName = tabNameOverride;
         } else {
             const butcherType = getButcherType(butcherId);
             if (butcherType === 'mixed') {
-                // For mixed butchers without override, we can't determine which tab to use
                 throw new Error(`Tab name required for mixed butcher: ${butcherId}`);
             }
             tabName = BUTCHER_TABS[butcherId as keyof typeof BUTCHER_TABS] || null;
@@ -1933,11 +1943,9 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
 
-        // Determine butcher type
         const butcherType = getButcherType(butcherId);
         const isMeatButcher = butcherType === 'meat' || (butcherType === 'mixed' && tabName && getButcherConfig(butcherId)?.meatSheetTab === tabName);
         
-        // Read data from sheet
         const range = isMeatButcher ? `${tabName}!A2:G` : `${tabName}!A2:H`;
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: MENU_POS_SHEET_ID,
@@ -1951,14 +1959,11 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
             let itemName, categoryName, purchasePrice, sellingPrice, unit, nosWeight, size, date;
             
             if (isMeatButcher) {
-                // Meat butchers: Item Name, Category, Purchase Price, Selling Price, Unit, nos weight, Date
                 [itemName, categoryName, purchasePrice, sellingPrice, unit, nosWeight, date] = row;
                 size = 'default';
             } else {
-                // Fish butchers: Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight, Date
                 [itemName, categoryName, size, purchasePrice, sellingPrice, unit, nosWeight, date] = row;
                 
-                // Handle empty size for meat products
                 if (!size && categoryName && categoryName.toLowerCase().includes('meat')) {
                     size = 'default';
                 }
@@ -1966,7 +1971,6 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
             
             if (!itemName || !categoryName) continue;
 
-            // Create category if it doesn't exist
             if (!categoriesMap[categoryName]) {
                 categoriesMap[categoryName] = {
                     id: categoryName.toLowerCase().replace(/\s+/g, '-'),
@@ -1975,7 +1979,6 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
                 };
             }
 
-            // Parse weight range
             let minWeight: number | undefined;
             let maxWeight: number | undefined;
             if (nosWeight && nosWeight.includes('-')) {
@@ -1984,16 +1987,13 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
                 maxWeight = parseFloat(max) || undefined;
             }
 
-            // Parse price
             const parsedPrice = parseFloat(purchasePrice) || 0;
             
-            // Check if item already exists
             const existingItem = categoriesMap[categoryName].items.find(item => 
                 item.name.toLowerCase() === itemName.toLowerCase()
             );
             
             if (existingItem) {
-                // Add size to existing item
                 existingItem.sizes.push({
                     id: `s-${Date.now()}-${Math.random()}`,
                     size: size as 'default' | 'small' | 'medium' | 'big',
@@ -2002,7 +2002,6 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
                     maxWeight
                 });
             } else {
-                // Create new item
             const menuItem: MenuItem = {
                 id: itemName.toLowerCase().replace(/\s+/g, '-'),
                 name: itemName,
@@ -2035,11 +2034,9 @@ export const getMenuFromSheet = async (butcherId: string, tabNameOverride?: stri
  */
 const extractEnglishName = (fullName: string): string => {
     if (fullName.includes(' - ') && fullName.split(' - ').length >= 3) {
-        // Fish items: "Malayalam - English - Tamil" -> extract English name (middle part)
         const nameParts = fullName.split(' - ');
         return nameParts[1].trim();
     }
-    // For other items, return as is
     return fullName;
 };
 
@@ -2049,18 +2046,15 @@ const extractEnglishName = (fullName: string): string => {
  */
 export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCategory[], activeTab?: 'meat' | 'fish'): Promise<MenuCategory[]> => {
     try {
-        // For mixed butchers, determine which tab to load from
         const butcherType = getButcherType(butcherId);
         let tabName: string | null = null;
         if (butcherType === 'mixed') {
             if (activeTab) {
-                // Use activeTab to determine which sheet tab to use
                 const config = getButcherConfig(butcherId);
                 if (config) {
                     tabName = activeTab === 'meat' ? config.meatSheetTab || null : config.fishSheetTab || null;
                 }
             } else if (fullMenu.length > 0) {
-                // Fallback: determine from first category
                 tabName = getPriceSheetTab(butcherId, fullMenu[0].name);
             }
             
@@ -2070,12 +2064,10 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
         }
         const sheetMenu = await getMenuFromSheet(butcherId, tabName);
         
-        // Create a simple lookup map
         const sheetDataMap: { [key: string]: { [size: string]: { price: number, minWeight?: number, maxWeight?: number } } } = {};
         
         for (const category of sheetMenu) {
             for (const item of category.items) {
-                // Create lookup keys for the item name
                 const keys = [
                     item.name,
                     item.name.toLowerCase(),
@@ -2100,11 +2092,9 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
             }
         }
 
-        // Merge with full menu
         const mergedMenu = fullMenu.map(category => ({
             ...category,
             items: category.items.map(item => {
-                // Extract English name for fish items
                 let searchName = item.name;
                 
                 if (item.name.includes(' - ') && item.name.split(' - ').length >= 3) {
@@ -2112,13 +2102,8 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
                     searchName = nameParts[1].trim(); // Extract English name
                 }
                 
-                // Try to find sheet data
                 let sheetItem = null;
                 
-                // No longer using "meat" suffix for fish butchers' meat items
-                // Fish butchers will match items using original names
-                
-                // If no meat-specific match found, try general matching
                 if (!sheetItem) {
                     sheetItem = sheetDataMap[searchName] || 
                                sheetDataMap[searchName.toLowerCase()] || 
@@ -2127,10 +2112,9 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
                 }
                 
                 if (!sheetItem) {
-                    return item; // No sheet data found
+                    return item;
                 }
 
-                // Update sizes with sheet data
                 const updatedSizes = item.sizes.map(size => {
                     const sheetSizeData = sheetItem[size.size];
                     if (sheetSizeData && sheetSizeData.price > 0) {
@@ -2144,7 +2128,6 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
                     return size;
                 });
 
-                // Determine availability
                 const hasAnyPrice = updatedSizes.some(size => size.price > 0);
 
                 return {
@@ -2168,7 +2151,6 @@ export const mergeMenuFromSheet = async (butcherId: string, fullMenu: MenuCatego
  */
 export const getButcherEarnings = async (butcherId: string, orderItems: OrderItem[]): Promise<{ [itemName: string]: { purchasePrice: number; butcherEarnings: number; totalEarnings: number } }> => {
     try {
-        // Direct Google Sheets call for earnings calculation
 
         if (!MENU_POS_SHEET_ID) {
             throw new Error("GOOGLE_SHEET_ID_MENU_POS not configured");
@@ -2181,12 +2163,8 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
             throw new Error(`No tab found for butcher: ${butcherId}`);
         }
 
-        // Determine if this is a meat butcher (no size column)
         const isMeatButcher = getButcherType(butcherId) === 'meat';
         
-        // Different column structures based on butcher type
-        // Meat butchers: Item Name | Category | Purchase Price | Selling Price | Unit | nos weight (6 columns)
-        // Fish butchers: Item Name | Category | Size | Purchase Price | Selling Price | Unit | nos weight (7 columns)
         const range = isMeatButcher ? `${tabName}!A2:F` : `${tabName}!A2:G`;
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: MENU_POS_SHEET_ID,
@@ -2196,7 +2174,6 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
         const rows = response.data.values || [];
         const menuPrices: { [itemName: string]: number } = {};
 
-        // Build price lookup from menu sheet with size consideration
         console.log(`Building menu prices for ${butcherId} (${isMeatButcher ? 'meat' : 'fish'} butcher)`);
         console.log(`Found ${rows.length} rows in menu sheet`);
         
@@ -2204,22 +2181,18 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
             let itemName, size, purchasePrice;
             
             if (isMeatButcher) {
-                // Meat butchers: Item Name, Category, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , purchasePrice] = row;
-                size = 'default'; // Meat products don't have sizes
+                size = 'default';
             } else {
-                // Fish butchers: Item Name, Category, Size, Purchase Price, Selling Price, Unit, nos weight
                 [itemName, , size, purchasePrice] = row;
             }
             if (itemName && purchasePrice) {
                 const price = parseFloat(purchasePrice) || 0;
-                const exactKey = itemName.trim(); // Keep exact case and spacing from sheet
+                const exactKey = itemName.trim();
                 
-                // Store base price with exact case and spacing
                 menuPrices[exactKey] = price;
                 console.log(`Added menu price: "${exactKey}" = ${price} (exact from sheet)`);
                 
-                // For fish butchers with sizes, also store with size key
                 if (!isMeatButcher && size && size !== 'default') {
                     const keyWithSize = `${exactKey} (${size})`;
                     menuPrices[keyWithSize] = price;
@@ -2230,12 +2203,9 @@ export const getButcherEarnings = async (butcherId: string, orderItems: OrderIte
         
         console.log(`Final menu prices for ${butcherId}:`, Object.keys(menuPrices));
 
-        // Calculate earnings for each order item using dynamic commission rates
         const earnings: { [itemName: string]: { purchasePrice: number; butcherEarnings: number; totalEarnings: number } } = {};
 
-        for (const item of orderItems) {
-            // Use exact case-sensitive and space-sensitive matching
-            const exactItemName = item.name; // Keep original case and spacing
+        for (const item of orderItems) {            const exactItemName = item.name; // Keep original case and spacing
             const itemSize = item.size || 'default';
             let purchasePrice = 0;
 

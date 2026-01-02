@@ -534,13 +534,24 @@ class ZohoService {
 
       // Zoho Payments API: account_id is a query parameter, not in the path
       const url = `${this.paymentsBaseUrl}/paymentlinks?account_id=${this.config.accountId}`;
-      const body = {
-        ...params,
-        // Store invoice_id in reference_id for future matching
-        // Since we can't query payment links by invoice_id, we use reference_id
-        // to identify which invoice this payment link belongs to
-        reference_id: params.invoice_id || params.reference_id || undefined
+      const body: any = {
+        amount: params.amount.toString(),
+        currency: 'INR',
+        description: params.description || `Payment for ${params.amount} INR`,
       };
+      
+      // Add optional fields
+      if (params.invoice_id) {
+        body.reference_id = params.invoice_id;
+      }
+      if (params.customer_id) {
+        body.customer_id = params.customer_id;
+      }
+      if (params.expiry_days && params.expiry_days > 0) {
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + params.expiry_days);
+        body.expires_at = expiryDate.toISOString().split('T')[0];
+      }
       
       // Force use Payments auth for payment links
       const useBooksAuth = this.config.useBooksAuth;
@@ -571,7 +582,7 @@ class ZohoService {
       
       // If invoice is provided, use matching logic
       if (invoice) {
-        return this.matchPaymentLinksWithInvoice(invoice, []);
+        return ZohoService.matchPaymentLinksWithInvoice(invoice, []);
       }
       
       // If no invoice provided, return empty array
@@ -666,7 +677,6 @@ class ZohoService {
             } catch (error3: any) {
               if (process.env.ZOHO_DEBUG === 'true') {
                 console.log('[Zoho Debug] All payment link endpoint formats failed. Last error:', error3.message);
-                console.log('[Zoho Debug] Response structure:', JSON.stringify(response3, null, 2).substring(0, 500));
               }
             }
           }

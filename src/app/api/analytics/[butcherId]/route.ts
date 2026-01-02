@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrdersFromSheet } from '@/lib/sheets';
-import { getOrdersFromSalesSheet } from '@/lib/salesSheets';
 import { verifyUserToken } from '@/lib/auth/jwt';
 
 const ORDERS_PER_PAGE = 100;
@@ -41,11 +40,8 @@ export async function GET(
       );
     }
 
-    // For admin users, fetch from Sales VCS Sheet; for others, use Butcher POS Sheet
-    const isAdmin = decoded.role === 'admin';
-    const allOrders = isAdmin 
-      ? await getOrdersFromSalesSheet(butcherId)
-      : await getOrdersFromSheet(butcherId);
+    // Fetch from Butcher POS Sheet for all users (admin and butchers)
+    const allOrders = await getOrdersFromSheet(butcherId);
 
     // Calculate pagination
     const totalCount = allOrders.length;

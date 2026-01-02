@@ -25,11 +25,12 @@ import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, end
 import type { Order } from "../../lib/types"
 import { getItemPurchasePricesFromSheet } from "../../lib/sheets"
 import { freshButchers, extractEnglishName } from "../../lib/butcherConfig"
+import { OrderEditModal } from "./OrderEditModal"
 
 interface OrdersAnalyticsProps {
   className?: string
-  allOrders: Order[] // Shared orders data from parent
-  onRefresh?: () => void // Parent refresh function
+  allOrders: Order[]
+  onRefresh?: () => void
   isLoading?: boolean
 }
 
@@ -116,14 +117,15 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [itemStats, setItemStats] = useState<Record<string, { totalWeight: number; totalRevenue: number; count: number }>>({})
   const [isCalculatingItemStats, setIsCalculatingItemStats] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // Remove duplicate orders by order ID
   const removeDuplicateOrders = useCallback((orders: Order[]): Order[] => {
     const orderMap = new Map<string, Order>()
     orders.forEach(order => {
-      // Use order ID as key, keep the first occurrence
-      if (!orderMap.has(order.id)) {
-        orderMap.set(order.id, order)
+      const uniqueKey = `${order.butcherId || 'unknown'}-${order.id}`
+      if (!orderMap.has(uniqueKey)) {
+        orderMap.set(uniqueKey, order)
       }
     })
     return Array.from(orderMap.values())
@@ -194,11 +196,9 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     }
   }
 
-  // Use external loading state if provided
   const isLoadingState = externalIsLoading !== undefined ? externalIsLoading : false
   const isRefreshingState = isRefreshing
 
-  // Export orders to CSV
   const handleExportCSV = () => {
     if (filteredOrders.length === 0) {
       toast({
@@ -357,10 +357,9 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       return orderDate.toDateString() === today.toDateString() && 
              ['completed', 'prepared', 'ready to pick up'].includes(order.status.toLowerCase());
     });
-  }, [filteredOrders]); // Only recalculate when filteredOrders changes
+  }, [filteredOrders]);
 
 
-  // Calculate item stats when orders change - using useEffect with proper dependency management
   useEffect(() => {
     const runCalculation = async () => {
       if (todayCompletedOrders.length === 0) {
@@ -368,7 +367,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
         return;
       }
 
-      // Prevent unnecessary calculations if already calculating
       if (isCalculatingItemStats) {
         return;
       }
@@ -386,7 +384,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
               stats[item.name] = { totalWeight: 0, totalRevenue: 0, count: 0 };
             }
             
-            // Distribute weight and revenue proportionally based on item quantity
             const totalItemQuantity = order.items.reduce((sum, i) => sum + i.quantity, 0);
             const itemProportion = totalItemQuantity > 0 ? item.quantity / totalItemQuantity : 0;
             const itemWeight = orderWeight * itemProportion;
@@ -408,7 +405,6 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     runCalculation();
   }, [todayCompletedOrders]); // Use direct dependency
 
-  // Sort items by revenue (highest first)
   const sortedItemStats = Object.entries(itemStats)
     .map(([name, stats]) => ({ name, ...stats }))
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
@@ -689,7 +685,14 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
                   <TableBody>
                         {filteredOrders.map((order, index) => {
                           return (
-                      <TableRow key={`${order.id}-${order.butcherId}-${index}`} className={getOrderRowStyle(order.status)}>
+                      <TableRow 
+                        key={`${order.id}-${order.butcherId}-${index}`} 
+                        className={`${getOrderRowStyle(order.status)} cursor-pointer hover:bg-muted/50`}
+                        onClick={() => {
+                          setSelectedOrder(order)
+                          setIsModalOpen(true)
+                        }}
+                      >
                               <TableCell className="font-medium whitespace-nowrap">
                           {order.id.replace('ORD-', '')}
                         </TableCell>
@@ -771,6 +774,21 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
           )}
         </CardContent>
       </Card>
+
+      {/* Order Edit Modal */}
+      <OrderEditModal
+        order={selectedOrder}
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false)
+          setSelectedOrder(null)
+        }}
+        onUpdate={() => {
+          if (onRefresh) {
+            onRefresh()
+          }
+        }}
+      />
     </div>
   )
 }

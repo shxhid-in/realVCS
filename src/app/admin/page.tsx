@@ -232,12 +232,12 @@ export default function AdminPage() {
       if (allOrdersData.length > 0) {
         toast({
           title: "Data Loaded",
-          description: `Loaded ${allOrdersData.length} orders from sheets.`,
+          description: `Loaded ${allOrdersData.length} orders.`,
         });
       }
     } catch (error: any) {
       console.error('Error fetching orders:', error);
-      const errorMessage = error.message || "Failed to fetch orders data from sheets.";
+      const errorMessage = error.message || "Failed to fetch orders.";
       setError(errorMessage);
       toast({
         variant: "destructive",
