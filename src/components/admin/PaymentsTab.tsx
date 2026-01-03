@@ -17,7 +17,6 @@ import { format } from "date-fns"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
 import { Label } from "../ui/label"
 import type { ZohoPayment } from "../../lib/zohoService"
-import { PaymentLinkModal } from "./PaymentLinkModal"
 import { CreatePaymentLinkModal } from "./CreatePaymentLinkModal"
 
 interface PaymentsTabProps {
@@ -29,24 +28,16 @@ export interface PaymentsTabRef {
   refresh: () => void
 }
 
-interface PaymentWithLink {
-  payment: ZohoPayment
-  paymentLinkStatus?: 'active' | 'paid' | 'expired' | 'cancelled'
-  paymentLinkId?: string
-}
-
 type PaymentSortOption = 'date-desc' | 'date-asc' | 'status-asc' | 'status-desc' | 'amount-desc' | 'amount-asc'
 
-const paymentsCache = new Map<string, { data: PaymentWithLink[]; timestamp: number }>()
+const paymentsCache = new Map<string, { data: ZohoPayment[]; timestamp: number }>()
 const CACHE_DURATION = 5 * 60 * 1000
 
 export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
   ({ selectedDate, onRefresh }, ref) => {
   const { toast } = useToast()
-  const [payments, setPayments] = useState<PaymentWithLink[]>([])
+  const [payments, setPayments] = useState<ZohoPayment[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedPayment, setSelectedPayment] = useState<PaymentWithLink | null>(null)
-  const [isPaymentLinkModalOpen, setIsPaymentLinkModalOpen] = useState(false)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [sortBy, setSortBy] = useState<PaymentSortOption>('date-desc')
   const [hasFetched, setHasFetched] = useState(false)
@@ -78,33 +69,13 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
       
       const { payments: fetchedPayments } = data
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[PaymentsTab] Fetched payments:', {
-          count: fetchedPayments?.length || 0,
-          sample: fetchedPayments?.[0],
-          selectedDate
-        });
-      }
-      
-      const paymentsWithLinks: PaymentWithLink[] = (fetchedPayments || []).map((payment: ZohoPayment) => ({
-        payment,
-        paymentLinkStatus: payment.status === 'succeeded' ? 'paid' : 'active' as const,
-      }))
-      
       paymentsCache.set(selectedDate, {
-        data: paymentsWithLinks,
+        data: fetchedPayments || [],
         timestamp: Date.now()
       })
       
-      setPayments(paymentsWithLinks)
+      setPayments(fetchedPayments || [])
       setHasFetched(true)
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[PaymentsTab] Processed payments:', {
-          count: paymentsWithLinks.length,
-          payments: paymentsWithLinks
-        });
-      }
     } catch (error) {
       console.error('Error fetching payments:', error)
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch payments"
@@ -123,14 +94,14 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
         toast({
           variant: "destructive",
           title: "Rate Limit Exceeded",
-          description: `Too many API requests. Please wait ${retryAfter} seconds and try again. The system will automatically retry.`,
+          description: `Too many API requests. Please wait ${retryAfter} seconds and try again.`,
         })
         
-        // Auto-retry after delay (exponential backoff handled by server)
+        // Auto-retry after delay
         if (!forceRefresh) {
           setTimeout(() => {
             fetchPayments(false)
-          }, 5000) // Retry after 5 seconds
+          }, 5000)
         }
       } else {
         toast({
@@ -159,14 +130,8 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
     }
   }))
 
-  const handlePaymentClick = (paymentWithLink: PaymentWithLink) => {
-    setSelectedPayment(paymentWithLink)
-    setIsPaymentLinkModalOpen(true)
-  }
-
   const getPaymentMethodIcon = (method: string | undefined | null | number) => {
     if (!method) return <CreditCard className="h-4 w-4" />
-    // Ensure method is a string
     const methodStr = String(method)
     const methodLower = methodStr.toLowerCase()
     if (methodLower.includes('upi') || methodLower.includes('phonepe') || methodLower.includes('gpay')) {
@@ -193,67 +158,46 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
     )
   }
 
-  const getPaymentLinkStatusBadge = (status?: string) => {
-    if (!status) return <Badge variant="outline">N/A</Badge>
-    
-    const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      'active': { label: 'Active', variant: 'default' },
-      'paid': { label: 'Paid', variant: 'default' },
-      'expired': { label: 'Expired', variant: 'secondary' },
-      'cancelled': { label: 'Cancelled', variant: 'destructive' },
-    }
-    
-    const statusInfo = statusMap[status.toLowerCase()] || { label: status, variant: 'outline' as const }
-    
-    return (
-      <Badge variant={statusInfo.variant}>
-        {statusInfo.label}
-      </Badge>
-    )
-  }
-
-  const sortPayments = (paymentsToSort: PaymentWithLink[], sortOption: PaymentSortOption): PaymentWithLink[] => {
+  const sortPayments = (paymentsToSort: ZohoPayment[], sortOption: PaymentSortOption): ZohoPayment[] => {
     const sorted = [...paymentsToSort]
     
     switch (sortOption) {
       case 'date-desc':
         return sorted.sort((a, b) => {
-          const dateA = typeof a.payment.date === 'number' 
-            ? (a.payment.date < 10000000000 ? a.payment.date * 1000 : a.payment.date)
-            : new Date(a.payment.date).getTime()
-          const dateB = typeof b.payment.date === 'number'
-            ? (b.payment.date < 10000000000 ? b.payment.date * 1000 : b.payment.date)
-            : new Date(b.payment.date).getTime()
-          return dateB - dateA // Newest first
+          const dateA = typeof a.date === 'number' 
+            ? (a.date < 10000000000 ? a.date * 1000 : a.date)
+            : new Date(a.date).getTime()
+          const dateB = typeof b.date === 'number'
+            ? (b.date < 10000000000 ? b.date * 1000 : b.date)
+            : new Date(b.date).getTime()
+          return dateB - dateA
         })
       case 'date-asc':
         return sorted.sort((a, b) => {
-          const dateA = typeof a.payment.date === 'number'
-            ? (a.payment.date < 10000000000 ? a.payment.date * 1000 : a.payment.date)
-            : new Date(a.payment.date).getTime()
-          const dateB = typeof b.payment.date === 'number'
-            ? (b.payment.date < 10000000000 ? b.payment.date * 1000 : b.payment.date)
-            : new Date(b.payment.date).getTime()
-          return dateA - dateB // Oldest first
+          const dateA = typeof a.date === 'number'
+            ? (a.date < 10000000000 ? a.date * 1000 : a.date)
+            : new Date(a.date).getTime()
+          const dateB = typeof b.date === 'number'
+            ? (b.date < 10000000000 ? b.date * 1000 : b.date)
+            : new Date(b.date).getTime()
+          return dateA - dateB
         })
       case 'status-asc':
-        return sorted.sort((a, b) => {
-          // Sort by payment link status (what's displayed in Link Status column)
-          const statusA = (a.paymentLinkStatus || 'N/A').toLowerCase()
-          const statusB = (b.paymentLinkStatus || 'N/A').toLowerCase()
-          return statusA.localeCompare(statusB)
-        })
+        return sorted.sort((a, b) => a.status.toLowerCase().localeCompare(b.status.toLowerCase()))
       case 'status-desc':
-        return sorted.sort((a, b) => {
-          // Sort by payment link status (what's displayed in Link Status column)
-          const statusA = (a.paymentLinkStatus || 'N/A').toLowerCase()
-          const statusB = (b.paymentLinkStatus || 'N/A').toLowerCase()
-          return statusB.localeCompare(statusA)
-        })
+        return sorted.sort((a, b) => b.status.toLowerCase().localeCompare(a.status.toLowerCase()))
       case 'amount-desc':
-        return sorted.sort((a, b) => b.payment.amount - a.payment.amount) // High to low
+        return sorted.sort((a, b) => {
+          const amountA = typeof a.amount === 'string' ? parseFloat(a.amount) : a.amount
+          const amountB = typeof b.amount === 'string' ? parseFloat(b.amount) : b.amount
+          return amountB - amountA
+        })
       case 'amount-asc':
-        return sorted.sort((a, b) => a.payment.amount - b.payment.amount) // Low to high
+        return sorted.sort((a, b) => {
+          const amountA = typeof a.amount === 'string' ? parseFloat(a.amount) : a.amount
+          const amountB = typeof b.amount === 'string' ? parseFloat(b.amount) : b.amount
+          return amountA - amountB
+        })
       default:
         return sorted
     }
@@ -275,8 +219,8 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
             <SelectContent>
               <SelectItem value="date-desc">Date (Newest First)</SelectItem>
               <SelectItem value="date-asc">Date (Oldest First)</SelectItem>
-              <SelectItem value="status-asc">Link Status (A-Z)</SelectItem>
-              <SelectItem value="status-desc">Link Status (Z-A)</SelectItem>
+              <SelectItem value="status-asc">Status (A-Z)</SelectItem>
+              <SelectItem value="status-desc">Status (Z-A)</SelectItem>
               <SelectItem value="amount-desc">Amount (High to Low)</SelectItem>
               <SelectItem value="amount-asc">Amount (Low to High)</SelectItem>
             </SelectContent>
@@ -295,28 +239,27 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
+                  <TableHead>Phone</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Payment Method</TableHead>
-                  <TableHead>Link Status</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8">
+                    <TableCell colSpan={5} className="text-center py-8">
                       <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
                     </TableCell>
                   </TableRow>
                 ) : payments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                       No payments found for selected date
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sortedPayments.map((paymentWithLink) => {
-                    const { payment } = paymentWithLink
-                    
+                  sortedPayments.map((payment) => {
                     let paymentDate = 'N/A'
                     if (payment.date) {
                       try {
@@ -360,25 +303,20 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
                       }
                     }
                     
-                    // Debug log in development
-                    if (process.env.NODE_ENV === 'development' && typeof paymentMethodRaw === 'object') {
-                      console.log('[PaymentsTab] Payment method is object:', {
-                        payment_id: payment.payment_id,
-                        paymentMethodRaw,
-                        extracted: paymentMethod
-                      })
-                    }
-                    
                     return (
-                      <TableRow 
-                        key={payment.payment_id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => handlePaymentClick(paymentWithLink)}
-                      >
+                      <TableRow key={payment.payment_id}>
                         <TableCell>{paymentDate}</TableCell>
+                        <TableCell>
+                          <span className="text-sm font-mono">
+                            {payment.phone 
+                              ? `${payment.dialing_code || ''} ${payment.phone}`.trim()
+                              : 'N/A'
+                            }
+                          </span>
+                        </TableCell>
                         <TableCell className="text-right font-medium">
                           <IndianRupee className="h-4 w-4 inline mr-1" />
-                          {payment.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          {(typeof payment.amount === 'string' ? parseFloat(payment.amount) : payment.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -387,7 +325,7 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
                           </div>
                         </TableCell>
                         <TableCell>
-                          {getPaymentLinkStatusBadge(paymentWithLink.paymentLinkStatus)}
+                          {getPaymentStatusBadge(payment.status)}
                         </TableCell>
                       </TableRow>
                     )
@@ -399,35 +337,16 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
         </CardContent>
       </Card>
 
-      {selectedPayment && (
-        <PaymentLinkModal
-          payment={selectedPayment.payment}
-          paymentLinkId={selectedPayment.paymentLinkId}
-          isOpen={isPaymentLinkModalOpen}
-          onClose={() => {
-            setIsPaymentLinkModalOpen(false)
-            setSelectedPayment(null)
-          }}
-          onUpdate={() => {
-            fetchPayments()
-            setIsPaymentLinkModalOpen(false)
-          }}
-        />
-      )}
-
-      {isCreateModalOpen && (
-        <CreatePaymentLinkModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          onSuccess={() => {
-            fetchPayments()
-            setIsCreateModalOpen(false)
-          }}
-        />
-      )}
+      <CreatePaymentLinkModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          fetchPayments(true)
+          setIsCreateModalOpen(false)
+        }}
+      />
     </div>
   )
 })
 
 PaymentsTab.displayName = 'PaymentsTab'
-

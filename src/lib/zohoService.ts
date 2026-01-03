@@ -15,10 +15,12 @@ interface ZohoConfig {
 interface ZohoInvoice {
   invoice_id: string;
   invoice_number: string;
+  reference_number?: string;
   customer_id: string;
   customer_name: string;
   contact_persons?: Array<{ contact_person_id: string; phone?: string; mobile?: string }>;
   phone?: string;
+  email?: string;
   date: string;
   due_date?: string;
   status: string;
@@ -37,23 +39,39 @@ interface ZohoInvoice {
   description?: string;
   notes?: string;
   terms?: string;
+  invoice_url?: string;
+  currency_code?: string;
+  currency_symbol?: string;
 }
 
 interface ZohoPayment {
   payment_id: string;
-  payment_number: string;
+  payment_number?: string;
   invoice_id?: string;
   invoice_number?: string;
-  customer_id: string;
-  customer_name: string;
-  amount: number;
-  date: string | number; // Can be ISO string or timestamp
+  amount: number | string;
+  date: string | number; // Date in milliseconds (Unix timestamp)
   payment_mode?: string;
-  payment_method?: string | { name?: string; type?: string; method?: string; label?: string; [key: string]: any }; // Can be string or object
-  method?: string | { name?: string; type?: string; method?: string; label?: string; [key: string]: any }; // Can be string or object
+  payment_method?: string | { payment_method_id?: string; type?: string; upi?: { upi_id?: string; channel?: string }; [key: string]: any };
+  method?: string | { payment_method_id?: string; type?: string; upi?: { upi_id?: string; channel?: string }; [key: string]: any };
   description?: string;
   reference_number?: string;
+  transaction_reference_number?: string;
   status: string;
+  currency?: string;
+  net_amount?: string;
+  fee_amount?: string;
+  statement_descriptor?: string;
+  receipt_email?: string;
+  customer_email?: string;
+  customer_id?: string;
+  customer_name?: string;
+  dialing_code?: string;
+  phone?: string;
+  payment_type?: string;
+  balance?: string;
+  amount_captured?: string;
+  amount_refunded?: string;
 }
 
 interface ZohoPaymentLink {
@@ -559,7 +577,19 @@ class ZohoService {
       
       try {
         const response = await this.makeRequest(url, 'POST', body);
-        return response.payment_link;
+        
+        if (process.env.ZOHO_DEBUG === 'true') {
+          console.log('[Zoho Debug] Create payment link response:', JSON.stringify(response, null, 2));
+        }
+        
+        // Zoho API might return 'payment_link' or 'payment_links' (singular or plural)
+        const paymentLink = response.payment_link || response.payment_links;
+        
+        if (!paymentLink) {
+          throw new Error('Invalid response: payment link data not found');
+        }
+        
+        return paymentLink;
       } finally {
         this.config.useBooksAuth = useBooksAuth;
       }

@@ -243,6 +243,8 @@ export async function POST(request: NextRequest) {
       expiry_days,
     });
 
+    console.log('[API] Created payment link:', JSON.stringify(paymentLink, null, 2));
+
     return NextResponse.json({ payment_link: paymentLink });
   } catch (error) {
     console.error('Error creating payment link:', error);
