@@ -116,8 +116,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ invoices });
     }
   } catch (error) {
-    console.error('Error in Zoho invoices API:', error);
-    
     // Check if it's a rate limit error
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch invoices';
     const isRateLimit = errorMessage.includes('429') || 
@@ -130,6 +128,71 @@ export async function GET(request: NextRequest) {
         isRateLimit 
       },
       { status: isRateLimit ? 429 : 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { customer_id, date, reference_number, due_date, line_items, shipping_charge, notes } = body;
+
+    if (!customer_id) {
+      return NextResponse.json(
+        { error: 'customer_id is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!line_items || line_items.length === 0) {
+      return NextResponse.json(
+        { error: 'At least one line item is required' },
+        { status: 400 }
+      );
+    }
+
+    const organizationId = process.env.ZOHO_ORGANIZATION_ID;
+    const dataCenter = (process.env.ZOHO_DATA_CENTER as any) || 'com';
+
+    if (!process.env.ZOHO_CLIENT_ID || !process.env.ZOHO_CLIENT_SECRET || !process.env.ZOHO_REFRESH_TOKEN) {
+      return NextResponse.json(
+        { error: 'Zoho Books credentials not configured' },
+        { status: 500 }
+      );
+    }
+
+    if (!organizationId) {
+      return NextResponse.json(
+        { error: 'ZOHO_ORGANIZATION_ID not configured' },
+        { status: 500 }
+      );
+    }
+
+    const zohoService = new ZohoService({
+      organizationId,
+      dataCenter,
+      useBooksAuth: true,
+    });
+
+    const invoice = await zohoService.createInvoice({
+      customer_id,
+      date: date || new Date().toISOString().split('T')[0],
+      reference_number,
+      due_date,
+      line_items,
+      shipping_charge,
+      notes,
+    });
+
+    // Clear cache for the invoice date
+    const cache = getZohoCache();
+    cache.invalidateInvoices(date || new Date().toISOString().split('T')[0]);
+
+    return NextResponse.json({ invoice });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to create invoice' },
+      { status: 500 }
     );
   }
 }
@@ -174,7 +237,6 @@ export async function PUT(request: NextRequest) {
     const updatedInvoice = await zohoService.updateInvoice(invoiceId, updates);
     return NextResponse.json({ invoice: updatedInvoice });
   } catch (error) {
-    console.error('Error updating invoice:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to update invoice' },
       { status: 500 }

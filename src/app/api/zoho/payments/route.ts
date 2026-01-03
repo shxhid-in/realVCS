@@ -80,8 +80,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ payments });
   } catch (error) {
-    console.error('Error in Zoho payments API:', error);
-    
     // Check if it's a rate limit error
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch payments';
     const isRateLimit = errorMessage.includes('429') || 

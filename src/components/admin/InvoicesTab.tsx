@@ -78,7 +78,6 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
       setInvoices(fetchedInvoices || [])
       setHasFetched(true)
     } catch (error) {
-      console.error('Error fetching invoices:', error)
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch invoices"
       
       // Check if it's a rate limit error (429)
@@ -139,8 +138,8 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
         setSelectedInvoice(fullInvoice)
         setIsEditModalOpen(true)
       }
-    } catch (error) {
-      console.error('Error fetching invoice details:', error)
+    } catch {
+      // Error fetching invoice details - silently fail
     }
   }
 

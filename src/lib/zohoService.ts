@@ -395,7 +395,9 @@ class ZohoService {
       const response = await this.makeRequest(url);
       return response.invoice;
     } catch (error) {
-      console.error('Error fetching invoice:', error);
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error fetching invoice:', error);
+      }
       throw error;
     }
   }
@@ -409,7 +411,96 @@ class ZohoService {
       const response = await this.makeRequest(url, 'PUT', updates);
       return response.invoice;
     } catch (error) {
-      console.error('Error updating invoice:', error);
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error updating invoice:', error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get contacts/customers from Zoho Books
+   * @param search Optional search term to filter contacts
+   */
+  async getContacts(search?: string): Promise<Array<{
+    contact_id: string;
+    contact_name: string;
+    company_name?: string;
+    email?: string;
+    phone?: string;
+    contact_type: string;
+  }>> {
+    try {
+      let url = `${this.invoiceBaseUrl}/contacts?per_page=50`;
+      
+      // Add search filter if provided
+      if (search && search.trim()) {
+        url += `&contact_name_contains=${encodeURIComponent(search.trim())}`;
+      }
+      
+      const response = await this.makeRequest(url);
+      return response.contacts || [];
+    } catch (error) {
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error fetching contacts:', error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new invoice in Zoho Books
+   */
+  async createInvoice(invoiceData: {
+    customer_id: string;
+    date: string;
+    reference_number?: string;
+    due_date?: string;
+    line_items: Array<{
+      name: string;
+      description?: string;
+      quantity: number;
+      rate: number;
+      unit?: string;
+    }>;
+    shipping_charge?: number;
+    notes?: string;
+  }): Promise<ZohoInvoice> {
+    try {
+      const url = `${this.invoiceBaseUrl}/invoices`;
+      
+      // Format the request body
+      const body = {
+        customer_id: invoiceData.customer_id,
+        date: invoiceData.date,
+        reference_number: invoiceData.reference_number || '',
+        due_date: invoiceData.due_date || invoiceData.date,
+        line_items: invoiceData.line_items.map(item => ({
+          name: item.name,
+          description: item.description || '',
+          quantity: item.quantity,
+          rate: item.rate,
+          unit: item.unit || 'kg',
+        })),
+        shipping_charge: invoiceData.shipping_charge || 0,
+        notes: invoiceData.notes || '',
+      };
+      
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.log('[Zoho Debug] Creating invoice:', JSON.stringify(body, null, 2));
+      }
+      
+      const response = await this.makeRequest(url, 'POST', body);
+      
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.log('[Zoho Debug] Invoice created:', response.invoice?.invoice_id);
+      }
+      
+      return response.invoice;
+    } catch (error) {
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error creating invoice:', error);
+      }
       throw error;
     }
   }
@@ -494,7 +585,9 @@ class ZohoService {
       
       return filteredPayments;
     } catch (error) {
-      console.error('Error fetching payments:', error);
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error fetching payments:', error);
+      }
       throw error;
     }
   }
@@ -530,7 +623,9 @@ class ZohoService {
         return response2.payments || [];
       }
     } catch (error) {
-      console.error('Error fetching all payments:', error);
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error fetching all payments:', error);
+      }
       throw error;
     }
   }
@@ -594,7 +689,9 @@ class ZohoService {
         this.config.useBooksAuth = useBooksAuth;
       }
     } catch (error) {
-      console.error('Error creating payment link:', error);
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error creating payment link:', error);
+      }
       throw error;
     }
   }
@@ -618,7 +715,9 @@ class ZohoService {
       // If no invoice provided, return empty array
       return [];
     } catch (error) {
-      console.error('Error fetching payment links:', error);
+      if (process.env.ZOHO_DEBUG === 'true') {
+        console.error('[Zoho Debug] Error fetching payment links:', error);
+      }
       throw error;
     }
   }
@@ -721,9 +820,8 @@ class ZohoService {
         this.config.useBooksAuth = useBooksAuth;
       }
     } catch (error) {
-      console.error('Error fetching all payment links:', error);
       if (process.env.ZOHO_DEBUG === 'true') {
-        console.error('[Zoho Debug] Full error:', error);
+        console.error('[Zoho Debug] Error fetching all payment links:', error);
       }
       return [];
     }

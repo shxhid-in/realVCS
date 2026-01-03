@@ -50,8 +50,7 @@ export async function GET(request: NextRequest) {
     let invoice = null;
     try {
       invoice = await booksService.getInvoice(invoiceId);
-    } catch (error) {
-      console.error('Error fetching invoice:', error);
+    } catch {
       // Continue without invoice - matching will return empty array
     }
 
@@ -190,7 +189,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ payment_links: paymentLinks });
   } catch (error) {
-    console.error('Error fetching payment links:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to fetch payment links' },
       { status: 500 }
@@ -243,11 +241,8 @@ export async function POST(request: NextRequest) {
       expiry_days,
     });
 
-    console.log('[API] Created payment link:', JSON.stringify(paymentLink, null, 2));
-
     return NextResponse.json({ payment_link: paymentLink });
   } catch (error) {
-    console.error('Error creating payment link:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to create payment link' },
       { status: 500 }

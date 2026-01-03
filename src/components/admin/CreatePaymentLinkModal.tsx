@@ -88,9 +88,6 @@ export function CreatePaymentLinkModal({ isOpen, onClose, onSuccess }: CreatePay
         status: paymentLinkData.status || 'active',
       }
       
-      console.log('[CreatePaymentLinkModal] API Response:', data)
-      console.log('[CreatePaymentLinkModal] Normalized Link:', normalizedLink)
-      
       if (!normalizedLink.url) {
         throw new Error('Payment link URL not found in response')
       }

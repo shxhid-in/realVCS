@@ -77,7 +77,6 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
       setPayments(fetchedPayments || [])
       setHasFetched(true)
     } catch (error) {
-      console.error('Error fetching payments:', error)
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch payments"
       
       // Check if it's a rate limit error (429)
@@ -281,8 +280,7 @@ export const PaymentsTab = React.forwardRef<PaymentsTabRef, PaymentsTabProps>(
                           dateObj = new Date(payment.date)
                         }
                         paymentDate = format(dateObj, 'MMM dd, yyyy HH:mm')
-                      } catch (error) {
-                        console.error('Error parsing payment date:', payment.date, error)
+                      } catch {
                         paymentDate = 'Invalid date'
                       }
                     }

@@ -11,14 +11,10 @@ import { useToast } from "../../hooks/use-toast"
 import { 
   IndianRupee, 
   Save, 
-  X, 
-  Edit,
-  ExternalLink,
-  Plus,
-  Send
+  Edit
 } from "lucide-react"
 import { format } from "date-fns"
-import type { ZohoInvoice, ZohoPaymentLink } from "../../lib/zohoService"
+import type { ZohoInvoice } from "../../lib/zohoService"
 
 interface InvoiceModalProps {
   invoice: ZohoInvoice
@@ -32,26 +28,12 @@ export function InvoiceModal({ invoice, isOpen, onClose, onUpdate }: InvoiceModa
   const [isEditing, setIsEditing] = useState(false)
   const [editedInvoice, setEditedInvoice] = useState<ZohoInvoice>(invoice)
   const [isSaving, setIsSaving] = useState(false)
-  const [paymentLinks, setPaymentLinks] = useState<ZohoPaymentLink[]>([])
 
   useEffect(() => {
     if (invoice) {
       setEditedInvoice(invoice)
-      fetchPaymentLinks()
     }
   }, [invoice])
-
-  const fetchPaymentLinks = async () => {
-    try {
-      const response = await fetch(`/api/zoho/payment-links?invoice_id=${invoice.invoice_id}`)
-      if (response.ok) {
-        const { payment_links } = await response.json()
-        setPaymentLinks(payment_links || [])
-      }
-    } catch (error) {
-      console.error('Error fetching payment links:', error)
-    }
-  }
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -82,58 +64,6 @@ export function InvoiceModal({ invoice, isOpen, onClose, onUpdate }: InvoiceModa
       })
     } finally {
       setIsSaving(false)
-    }
-  }
-
-  const handleCreatePaymentLink = async () => {
-    try {
-      const response = await fetch('/api/zoho/payment-links', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          invoice_id: invoice.invoice_id,
-          amount: editedInvoice.total,
-          description: editedInvoice.invoice_number,
-          customer_id: editedInvoice.customer_id,
-          expiry_days: 7,
-        }),
-      })
-
-      if (response.ok) {
-        toast({
-          title: "Payment Link Created",
-          description: "Payment link has been created successfully",
-        })
-        fetchPaymentLinks()
-      } else {
-        throw new Error('Failed to create payment link')
-      }
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to create payment link",
-      })
-    }
-  }
-
-  const handleSendPaymentLink = async (paymentLink: ZohoPaymentLink) => {
-    // This would typically send the payment link via email/SMS
-    // For now, just copy to clipboard
-    try {
-      await navigator.clipboard.writeText(paymentLink.payment_link_url)
-      toast({
-        title: "Link Copied",
-        description: "Payment link has been copied to clipboard",
-      })
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to copy payment link",
-      })
     }
   }
 
@@ -292,54 +222,6 @@ export function InvoiceModal({ invoice, isOpen, onClose, onUpdate }: InvoiceModa
             </div>
           </div>
 
-          {/* Payment Links Section */}
-          <div>
-            <div className="flex justify-between items-center mb-3">
-              <Label className="text-sm font-medium">Payment Links</Label>
-              <Button size="sm" variant="outline" onClick={handleCreatePaymentLink}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Payment Link
-              </Button>
-            </div>
-            {paymentLinks.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No payment links created</p>
-            ) : (
-              <div className="space-y-2">
-                {paymentLinks.map((link) => (
-                  <div key={link.payment_link_id} className="border rounded-lg p-3 flex justify-between items-center">
-                    <div>
-                      <p className="font-medium">
-                        <IndianRupee className="h-4 w-4 inline mr-1" />
-                        {link.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Status: <Badge variant="outline">{link.status}</Badge>
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => window.open(link.payment_link_url, '_blank')}
-                      >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        View Link
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleSendPaymentLink(link)}
-                      >
-                        <Send className="h-4 w-4 mr-2" />
-                        Send
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Notes/Description */}
           {(editedInvoice.notes || editedInvoice.description) && (
             <div>
@@ -362,4 +244,3 @@ export function InvoiceModal({ invoice, isOpen, onClose, onUpdate }: InvoiceModa
     </Dialog>
   )
 }
-
