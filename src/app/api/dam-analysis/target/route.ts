@@ -11,7 +11,6 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json(target);
   } catch (error) {
-    console.error('Error fetching DAM target:', error);
     return NextResponse.json(
       { error: 'Failed to fetch target data', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
@@ -22,7 +21,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { month, year, totalTarget } = body;
+    const { month, year, totalTarget, butcherTargets } = body;
 
     if (!month || !year || !totalTarget) {
       return NextResponse.json(
@@ -31,11 +30,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await saveDAMTargetToSheet(month, year, totalTarget);
+    // Save with optional butcher-specific targets
+    await saveDAMTargetToSheet(month, year, totalTarget, butcherTargets);
     
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error saving DAM target:', error);
     return NextResponse.json(
       { error: 'Failed to save target data' },
       { status: 500 }

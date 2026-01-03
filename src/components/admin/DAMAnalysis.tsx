@@ -30,7 +30,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import type { Order } from '@/lib/types';
 import { toDate } from '@/lib/utils';
-import { getCommissionRate, extractEnglishName } from '@/lib/butcherConfig';
+import { getCommissionRate, extractEnglishName, findCategoryForItem, BUTCHER_CONFIGS } from '@/lib/butcherConfig';
 
 interface WeeklyTarget {
   week: number;
@@ -40,6 +40,14 @@ interface WeeklyTarget {
   status: 'pending' | 'achieved' | 'missed';
 }
 
+interface ButcherTarget {
+  butcherId: string;
+  butcherName: string;
+  target: number;
+  achieved: number;
+  percentage: number;
+}
+
 interface MonthlyTarget {
   month: string;
   year: number;
@@ -47,6 +55,8 @@ interface MonthlyTarget {
   weeklyTargets: WeeklyTarget[];
   totalAchieved: number;
   overallPercentage: number;
+  butcherTargets?: ButcherTarget[];
+  isButcherSpecific?: boolean;
 }
 
 interface SalesData {
@@ -82,6 +92,19 @@ interface DAMAnalysisProps {
   isLoading?: boolean;
 }
 
+// Butcher list for targets
+const BUTCHER_LIST = [
+  { id: 'usaj', name: 'Usaj Meat Hub' },
+  { id: 'usaj_mutton', name: 'Usaj Mutton Shop' },
+  { id: 'pkd', name: 'PKD Stall' },
+  { id: 'tender_chops', name: 'Tender Chops' },
+  { id: 'kak', name: 'KAK' },
+  { id: 'ka_sons', name: 'KA Sons' },
+  { id: 'alif', name: 'Alif' },
+  { id: 'test_fish', name: 'Test Fish' },
+  { id: 'test_meat', name: 'Test Meat' },
+];
+
 const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, isLoading: externalIsLoading = false }) => {
   const [monthlyTarget, setMonthlyTarget] = useState<MonthlyTarget | null>(null);
   const [salesData, setSalesData] = useState<SalesData[]>([]);
@@ -93,6 +116,8 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [targetInput, setTargetInput] = useState('');
+  const [enableButcherTargets, setEnableButcherTargets] = useState(false);
+  const [butcherTargetInputs, setButcherTargetInputs] = useState<{ [butcherId: string]: string }>({});
   const tabsListRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
   const isLoadingRef = useRef(false);
@@ -161,9 +186,24 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
         const data = await response.json();
         setMonthlyTarget(data);
         setTargetInput(data?.totalTarget?.toString() || '');
+        
+        // Set butcher-specific targets if they exist
+        if (data?.isButcherSpecific && data?.butcherTargets) {
+          setEnableButcherTargets(true);
+          const inputs: { [butcherId: string]: string } = {};
+          data.butcherTargets.forEach((bt: ButcherTarget) => {
+            inputs[bt.butcherId] = bt.target.toString();
+          });
+          setButcherTargetInputs(inputs);
+        } else {
+          setEnableButcherTargets(false);
+          setButcherTargetInputs({});
+        }
       } else {
         setMonthlyTarget(null);
         setTargetInput('');
+        setEnableButcherTargets(false);
+        setButcherTargetInputs({});
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || 'Failed to load monthly target data');
       }
@@ -231,30 +271,56 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
             }).replace(',', '')
           : '';
         
+        const butcherRevenue = order.revenue || 0;
         let salesRevenue = 0;
-        if (order.itemRevenues && order.items.length > 0) {
+        let hasValidCommissionRate = false;
+        
+        // Get butcher config to find the correct commission rates
+        const butcherId = order.butcherId || '';
+        const butcherConfig = BUTCHER_CONFIGS[butcherId];
+        
+        // Try to calculate sales revenue from itemRevenues
+        if (order.itemRevenues && Object.keys(order.itemRevenues).length > 0) {
           order.items.forEach(item => {
-            const itemButcherRevenue = order.itemRevenues![item.name] || 0;
-            if (itemButcherRevenue > 0) {
-              const itemCategory = item.category || 'default';
-              const commissionRate = getCommissionRate(order.butcherId || '', itemCategory);
+            // Try different key formats: item.name, item.name_size, etc.
+            const itemRevenue = order.itemRevenues![item.name] 
+              || order.itemRevenues![`${item.name}_${item.size || 'default'}`]
+              || 0;
+            
+            if (itemRevenue > 0) {
+              // Find the correct category for this item using butcherConfig
+              const categoryName = findCategoryForItem(butcherId, item.name) || item.category || '';
+              const commissionRate = getCommissionRate(butcherId, categoryName);
               
-              if (commissionRate <= 0 || commissionRate >= 1) {
-                console.error(`[DAM Analysis] Invalid commission rate for order ${order.id}, item ${item.name}, butcher ${order.butcherId}, category ${itemCategory}. Commission rate: ${commissionRate}. Setting revenue to 0 for this item.`);
-                return;
+              // Only calculate if we have a valid commission rate (> 0 and < 1)
+              if (commissionRate > 0 && commissionRate < 1) {
+                // Formula: salesRevenue = butcherRevenue / (1 - commissionRate)
+                const itemSalesRevenue = itemRevenue / (1 - commissionRate);
+                salesRevenue += itemSalesRevenue;
+                hasValidCommissionRate = true;
               }
-              
-              const itemSalesRevenue = itemButcherRevenue / (1 - commissionRate);
-              salesRevenue += itemSalesRevenue;
             }
           });
-        } else if (order.revenue && order.revenue > 0) {
-          console.error(`[DAM Analysis] Missing itemRevenues for order ${order.id}, butcher ${order.butcherId}. Cannot calculate accurate sales revenue. Setting to 0.`);
-          salesRevenue = 0;
         }
         
-        const butcherRevenue = order.revenue || 0;
-        const margin = salesRevenue > 0 ? salesRevenue - butcherRevenue : 0;
+        // Fallback: If no itemRevenues or calculation failed, try using butcher's average commission
+        if (salesRevenue === 0 && butcherRevenue > 0 && butcherConfig) {
+          // Get the first available commission rate from the butcher's config
+          const commissionRates = Object.values(butcherConfig.commissionRates);
+          if (commissionRates.length > 0) {
+            // Use average commission rate for this butcher
+            const avgCommissionRate = commissionRates.reduce((a, b) => a + b, 0) / commissionRates.length;
+            if (avgCommissionRate > 0 && avgCommissionRate < 1) {
+              // Formula: salesRevenue = butcherRevenue / (1 - commissionRate)
+              salesRevenue = butcherRevenue / (1 - avgCommissionRate);
+              hasValidCommissionRate = true;
+            }
+          }
+        }
+        
+        // Calculate margin only if we have valid sales revenue
+        // Margin = Sales Revenue - Butcher Revenue (what we pay to butcher)
+        const margin = hasValidCommissionRate && salesRevenue > 0 ? salesRevenue - butcherRevenue : 0;
         
         return {
           orderId: order.id,
@@ -386,8 +452,37 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
       return;
     }
 
+    // Validate butcher targets if enabled
+    if (enableButcherTargets) {
+      const butcherTotal = BUTCHER_LIST.reduce((sum, butcher) => {
+        return sum + (parseFloat(butcherTargetInputs[butcher.id]) || 0);
+      }, 0);
+      
+      if (butcherTotal <= 0) {
+        toast({
+          variant: "destructive",
+          title: "Invalid Butcher Targets",
+          description: "Please enter valid targets for at least one butcher."
+        });
+        return;
+      }
+    }
+
     try {
       setIsSaving(true);
+      
+      // Prepare butcher targets if enabled
+      let butcherTargets = undefined;
+      if (enableButcherTargets) {
+        butcherTargets = BUTCHER_LIST
+          .filter(butcher => parseFloat(butcherTargetInputs[butcher.id]) > 0)
+          .map(butcher => ({
+            butcherId: butcher.id,
+            butcherName: butcher.name,
+            target: parseFloat(butcherTargetInputs[butcher.id]) || 0
+          }));
+      }
+      
       const response = await fetch('/api/dam-analysis/target', {
         method: 'POST',
         headers: {
@@ -396,14 +491,17 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
         body: JSON.stringify({
           month: selectedMonth,
           year: selectedYear,
-          totalTarget: parseFloat(targetInput)
+          totalTarget: parseFloat(targetInput),
+          butcherTargets
         }),
       });
 
       if (response.ok) {
         toast({
           title: "Target Saved",
-          description: "Monthly target has been saved successfully."
+          description: enableButcherTargets 
+            ? "Monthly target with butcher-specific targets has been saved successfully."
+            : "Monthly target has been saved successfully."
         });
         loadMonthlyTarget();
       } else {
@@ -460,12 +558,18 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
   const getPerformanceInsights = () => {
     if (!monthlyTarget) return [];
 
-    const totalSales = butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.totalSales, 0) : 0;
+    // Use API data for total achieved (from Butcher POS sheet)
+    const totalSales = monthlyTarget.totalAchieved > 0 
+      ? monthlyTarget.totalAchieved 
+      : (butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.totalSales, 0) : 0);
     const totalMargin = butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.totalMargin, 0) : 0;
     const totalOrders = butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.orderCount, 0) : 0;
     const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
     const marginPercentage = totalSales > 0 ? (totalMargin / totalSales) * 100 : 0;
-    const targetAchievement = monthlyTarget.totalTarget > 0 ? (totalSales / monthlyTarget.totalTarget) * 100 : 0;
+    // Use API-calculated percentage
+    const targetAchievement = monthlyTarget.overallPercentage > 0 
+      ? monthlyTarget.overallPercentage 
+      : (monthlyTarget.totalTarget > 0 ? (totalSales / monthlyTarget.totalTarget) * 100 : 0);
 
     const insights = [];
 
@@ -568,10 +672,16 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
   const getImprovementRecommendations = () => {
     if (!monthlyTarget) return [];
 
-    const totalSales = butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.totalSales, 0) : 0;
+    // Use API data for total achieved (from Butcher POS sheet)
+    const totalSales = monthlyTarget.totalAchieved > 0 
+      ? monthlyTarget.totalAchieved 
+      : (butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.totalSales, 0) : 0);
     const totalMargin = butcherSummary.length > 0 ? butcherSummary.reduce((sum, b) => sum + b.totalMargin, 0) : 0;
     const marginPercentage = totalSales > 0 ? (totalMargin / totalSales) * 100 : 0;
-    const targetAchievement = monthlyTarget.totalTarget > 0 ? (totalSales / monthlyTarget.totalTarget) * 100 : 0;
+    // Use API-calculated percentage
+    const targetAchievement = monthlyTarget.overallPercentage > 0 
+      ? monthlyTarget.overallPercentage 
+      : (monthlyTarget.totalTarget > 0 ? (totalSales / monthlyTarget.totalTarget) * 100 : 0);
 
     const recommendations = [];
 
@@ -808,6 +918,53 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
                   </Button>
                 </div>
               </div>
+              
+              {/* Butcher-specific targets toggle */}
+              <div className="flex items-center gap-3 pt-2">
+                <input
+                  type="checkbox"
+                  id="enable-butcher-targets"
+                  checked={enableButcherTargets}
+                  onChange={(e) => setEnableButcherTargets(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <Label htmlFor="enable-butcher-targets" className="text-sm cursor-pointer">
+                  Split target by butcher (optional)
+                </Label>
+              </div>
+              
+              {/* Butcher-specific target inputs */}
+              {enableButcherTargets && (
+                <div className="mt-4 p-4 bg-muted rounded-lg space-y-3">
+                  <h4 className="text-sm font-medium flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Butcher-specific Targets
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {BUTCHER_LIST.map((butcher) => (
+                      <div key={butcher.id} className="space-y-1">
+                        <Label htmlFor={`butcher-target-${butcher.id}`} className="text-xs text-muted-foreground">
+                          {butcher.name}
+                        </Label>
+                        <Input
+                          id={`butcher-target-${butcher.id}`}
+                          type="number"
+                          placeholder="0"
+                          value={butcherTargetInputs[butcher.id] || ''}
+                          onChange={(e) => setButcherTargetInputs(prev => ({
+                            ...prev,
+                            [butcher.id]: e.target.value
+                          }))}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Total: {formatCurrency(BUTCHER_LIST.reduce((sum, b) => sum + (parseFloat(butcherTargetInputs[b.id]) || 0), 0))}
+                  </p>
+                </div>
+              )}
 
               {isLoading && !monthlyTarget ? (
                 <div className="mt-6 p-4 bg-muted rounded-lg space-y-4">
@@ -829,35 +986,67 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
                   </div>
                 </div>
               ) : monthlyTarget && (
-                <div className="mt-6 p-4 bg-muted rounded-lg">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">
-                      {months[selectedMonth - 1]?.label} {selectedYear} Target
-                    </h3>
-                    <Badge variant="outline" className="text-lg font-bold">
-                      {formatCurrency(monthlyTarget.totalTarget)}
-                    </Badge>
+                <div className="mt-6 space-y-4">
+                  {/* Overall Progress */}
+                  <div className="p-4 bg-muted rounded-lg">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold">
+                        {months[selectedMonth - 1]?.label} {selectedYear} Target
+                      </h3>
+                      <Badge variant="outline" className="text-lg font-bold">
+                        {formatCurrency(monthlyTarget.totalTarget)}
+                      </Badge>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Overall Progress</span>
+                        <span className="text-sm text-muted-foreground">
+                          {formatCurrency(monthlyTarget.totalAchieved)} / {formatCurrency(monthlyTarget.totalTarget)}
+                        </span>
+                      </div>
+                      <Progress 
+                        value={Math.min(monthlyTarget.overallPercentage, 100)} 
+                        className="h-3"
+                      />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">0%</span>
+                        <span className={`font-semibold ${getOverallProgressColor(monthlyTarget.overallPercentage).replace('bg-', 'text-')}`}>
+                          {monthlyTarget.overallPercentage.toFixed(1)}%
+                        </span>
+                        <span className="text-muted-foreground">100%</span>
+                      </div>
+                    </div>
                   </div>
                   
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Overall Progress</span>
-                      <span className="text-sm text-muted-foreground">
-                        {formatCurrency(monthlyTarget.totalAchieved)} / {formatCurrency(monthlyTarget.totalTarget)}
-                      </span>
+                  {/* Butcher-specific Progress */}
+                  {monthlyTarget.isButcherSpecific && monthlyTarget.butcherTargets && monthlyTarget.butcherTargets.length > 0 && (
+                    <div className="p-4 bg-muted rounded-lg">
+                      <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Butcher Progress
+                      </h4>
+                      <div className="space-y-3">
+                        {monthlyTarget.butcherTargets.map((bt) => (
+                          <div key={bt.butcherId} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">{bt.butcherName}</span>
+                              <span className="text-muted-foreground">
+                                {formatCurrency(bt.achieved)} / {formatCurrency(bt.target)}
+                                <span className={`ml-2 font-semibold ${bt.percentage >= 100 ? 'text-green-600' : bt.percentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                  ({bt.percentage.toFixed(1)}%)
+                                </span>
+                              </span>
+                            </div>
+                            <Progress 
+                              value={Math.min(bt.percentage, 100)} 
+                              className="h-2"
+                            />
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <Progress 
-                      value={monthlyTarget.overallPercentage} 
-                      className="h-3"
-                    />
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">0%</span>
-                      <span className={`font-semibold ${getOverallProgressColor(monthlyTarget.overallPercentage).replace('bg-', 'text-')}`}>
-                        {monthlyTarget.overallPercentage.toFixed(1)}%
-                      </span>
-                      <span className="text-muted-foreground">100%</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -898,7 +1087,8 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
             </div>
           ) : (monthlyTarget || weeklyTargets.length > 0) && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {(weeklyTargets.length > 0 ? weeklyTargets : monthlyTarget?.weeklyTargets || []).map((week) => (
+              {/* Prefer API data from monthlyTarget.weeklyTargets for accurate Butcher POS data */}
+              {(monthlyTarget?.weeklyTargets && monthlyTarget.weeklyTargets.length > 0 ? monthlyTarget.weeklyTargets : weeklyTargets).map((week) => (
                 <Card key={week.week}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -1190,7 +1380,8 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {(weeklyTargets.length > 0 ? weeklyTargets : monthlyTarget?.weeklyTargets || []).map((week) => (
+                  {/* Prefer API data from monthlyTarget.weeklyTargets for accurate Butcher POS data */}
+                  {(monthlyTarget?.weeklyTargets && monthlyTarget.weeklyTargets.length > 0 ? monthlyTarget.weeklyTargets : weeklyTargets).map((week) => (
                     <div key={week.week} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="font-medium">Week {week.week}</span>

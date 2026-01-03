@@ -66,6 +66,14 @@ export interface WeeklyTarget {
   status: 'pending' | 'achieved' | 'missed';
 }
 
+export interface ButcherTarget {
+  butcherId: string;
+  butcherName: string;
+  target: number;
+  achieved: number;
+  percentage: number;
+}
+
 export interface MonthlyTarget {
   month: string;
   year: number;
@@ -73,6 +81,9 @@ export interface MonthlyTarget {
   weeklyTargets: WeeklyTarget[];
   totalAchieved: number;
   overallPercentage: number;
+  // New: Support for butcher-specific targets
+  butcherTargets?: ButcherTarget[];
+  isButcherSpecific?: boolean;
 }
 
 export interface SalesData {
@@ -97,6 +108,132 @@ const getSalesSpreadsheetId = () => {
   return process.env.SALES_VCS_SPREADSHEET_ID;
 };
 
+// Get the Butcher POS spreadsheet ID from environment
+const getButcherPOSSpreadsheetId = () => {
+  return process.env.BUTCHER_POS_SHEET_ID || process.env.GOOGLE_SPREADSHEET_ID;
+};
+
+// Get orders from Butcher POS sheet for a specific month/year (for target calculations)
+export const getOrdersFromButcherPOSForMonth = async (
+  month: number,
+  year: number
+): Promise<Array<{
+  butcherId: string;
+  butcherName: string;
+  orderDate: Date;
+  revenue: number;
+  status: string;
+}>> => {
+  try {
+    const spreadsheetId = getButcherPOSSpreadsheetId();
+    
+    if (!spreadsheetId) {
+      return [];
+    }
+
+    const sheets = await getSheetSheetsClient('pos');
+    const butcherIds = ['usaj', 'usaj_mutton', 'pkd', 'kak', 'ka_sons', 'alif', 'tender_chops', 'test_meat', 'test_fish'];
+    const orders: Array<{
+      butcherId: string;
+      butcherName: string;
+      orderDate: Date;
+      revenue: number;
+      status: string;
+    }> = [];
+    
+    for (const butcherId of butcherIds) {
+      try {
+        const butcherName = getButcherName(butcherId);
+        
+        // Butcher POS Sheet structure: A:K (11 columns with Size)
+        // Columns: Order Date | Order No | Items | Quantity | Size | Cut type | Preparing weight | Completion Time | Start time | Status | Revenue
+        const response = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `${butcherName}!A:K`,
+        });
+
+        const rows = response.data.values || [];
+        
+        // Skip header row
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (row.length < 10) continue;
+          
+          const orderDate = row[0] || '';
+          const statusFromSheet = row[9] || '';
+          const revenueFromSheet = row[10] || '';
+          
+          // Only count completed orders
+          const status = statusFromSheet.toLowerCase().trim();
+          if (!status.includes('completed') && !status.includes('accepted')) continue;
+          
+          // Parse order date
+          let orderDateObj: Date;
+          try {
+            if (orderDate.includes('/')) {
+              const parts = orderDate.split(' ');
+              const datePart = parts[0];
+              const [day, monthStr, yearStr] = datePart.split('/');
+              if (day && monthStr && yearStr) {
+                orderDateObj = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(day));
+              } else {
+                continue;
+              }
+            } else {
+              continue;
+            }
+          } catch {
+            continue;
+          }
+          
+          // Filter by month and year
+          if (orderDateObj.getMonth() + 1 !== month || orderDateObj.getFullYear() !== year) continue;
+          
+          // Parse revenue
+          let totalRevenue = 0;
+          if (revenueFromSheet) {
+            try {
+              if (revenueFromSheet.includes(':')) {
+                // New format: "item: revenue, item: revenue"
+                const revenueParts = revenueFromSheet.split(',').map((part: string) => part.trim());
+                revenueParts.forEach((part: string) => {
+                  if (part.includes(':')) {
+                    const [, revenueStr] = part.split(':').map((s: string) => s.trim());
+                    const revenue = parseFloat(revenueStr);
+                    if (!isNaN(revenue)) {
+                      totalRevenue += revenue;
+                    }
+                  }
+                });
+              } else {
+                // Old format: comma-separated numbers
+                const revenues = revenueFromSheet.split(',').map((r: string) => parseFloat(r.trim()) || 0);
+                totalRevenue = revenues.reduce((sum: number, rev: number) => sum + rev, 0);
+              }
+            } catch {
+              totalRevenue = parseFloat(revenueFromSheet) || 0;
+            }
+          }
+          
+          orders.push({
+            butcherId,
+            butcherName,
+            orderDate: orderDateObj,
+            revenue: totalRevenue,
+            status: statusFromSheet
+          });
+        }
+      } catch {
+        // Continue with other butchers
+      }
+    }
+    
+    return orders;
+  } catch {
+    return [];
+  }
+};
+
 // Get butcher name by ID (matching Sales VCS sheet tab names)
 const getButcherName = (butcherId: string): string => {
   const butcherNames: { [key: string]: string } = {
@@ -106,6 +243,7 @@ const getButcherName = (butcherId: string): string => {
     'kak': 'KAK',
     'ka_sons': 'KA_Sons',
     'alif': 'Alif',
+    'tender_chops': 'Tender_Chops',
     'test_fish': 'Test_Fish_Butcher',
     'test_meat': 'Test_Meat_Butcher'
   };
@@ -146,7 +284,6 @@ export const saveSalesDataToSheet = async (
   
   // Get butcher name mapping
   const butcherName = getButcherName(butcherId);
-  console.log(`Saving data for butcher: ${butcherId} -> ${butcherName}`);
 
   // Order Date: IST date (DD/MM/YYYY)
   const orderDate = getISTDate();
@@ -282,10 +419,7 @@ export const saveSalesDataToSheet = async (
       }
     });
 
-    console.log(`[Order] Saved to Sales VCS sheet: Order ${orderId}`);
-    
   } catch (error) {
-    console.error(`[Order] Failed to save sales data for order ${orderId}:`, error);
     throw new Error(`Failed to save sales data: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
@@ -300,12 +434,11 @@ export const getSalesDataFromSheet = async (
     const spreadsheetId = getSalesSpreadsheetId();
     
     if (!spreadsheetId) {
-      console.error('Sales VCS Spreadsheet ID not found');
       return [];
     }
 
     const salesData: SalesData[] = [];
-    const butcherIds = ['usaj', 'usaj_mutton', 'pkd', 'kak', 'ka_sons', 'alif'];
+    const butcherIds = ['usaj', 'usaj_mutton', 'pkd', 'kak', 'ka_sons', 'alif', 'tender_chops', 'test_meat', 'test_fish'];
     
     for (const butcherId of butcherIds) {
       try {
@@ -317,7 +450,6 @@ export const getSalesDataFromSheet = async (
         });
 
         const rows = response.data.values || [];
-        console.log(`Found ${rows.length} rows in ${butcherName} tab`);
         
         // Skip header row
         for (let i = 1; i < rows.length; i++) {
@@ -356,8 +488,8 @@ export const getSalesDataFromSheet = async (
                     }
                   }
                 });
-              } catch (error) {
-                console.warn(`Failed to parse revenue: ${revenueFromSheet}`, error);
+              } catch {
+                // Failed to parse revenue
               }
             }
             
@@ -377,8 +509,7 @@ export const getSalesDataFromSheet = async (
               } else {
                 orderDateObj = new Date(orderDate);
               }
-            } catch (error) {
-              console.warn(`Failed to parse date: ${orderDate}, using current date`);
+            } catch {
               orderDateObj = new Date();
             }
             
@@ -389,7 +520,6 @@ export const getSalesDataFromSheet = async (
               // Get butcher revenue from main sheet
               const butcherRevenue = await getButcherRevenueFromMainSheet(orderId, butcherId);
               const margin = salesRevenue - butcherRevenue;
-              console.log(`Margin calculation: ${salesRevenue} - ${butcherRevenue} = ${margin}`);
               
               salesData.push({
                 orderId,
@@ -410,14 +540,13 @@ export const getSalesDataFromSheet = async (
             }
           }
         }
-      } catch (error) {
-        console.error(`Error reading data from ${butcherId} tab:`, error);
+      } catch {
+        // Continue with other butchers
       }
     }
     
     return salesData;
-  } catch (error) {
-    console.error('Error getting sales data from sheet:', error);
+  } catch {
     return [];
   }
 };
@@ -445,8 +574,7 @@ const parseISTDate = (dateStr: string): Date => {
     }
     // Fallback to standard date parsing
     return new Date(dateStr);
-  } catch (error) {
-    console.warn(`Failed to parse date: ${dateStr}, using current date`);
+  } catch {
     return new Date();
   }
 };
@@ -755,23 +883,24 @@ export const getOrdersFromSalesSheet = async (butcherId: string): Promise<Order[
 
     return orders;
   } catch (error) {
-    console.error(`Error getting orders from Sales VCS sheet for ${butcherId}:`, error);
     throw error;
   }
 };
 
 // Save monthly target to sheet with proper column structure
+// Supports both general targets and butcher-specific targets
+// Now saves to Butcher POS sheet instead of Sales VCS sheet
 export const saveDAMTargetToSheet = async (
   month: number,
   year: number,
-  totalTarget: number
+  totalTarget: number,
+  butcherTargets?: Array<{ butcherId: string; butcherName: string; target: number }>
 ): Promise<void> => {
   try {
-    const sheets = await getSheetSheetsClient('sales');
-    const spreadsheetId = getSalesSpreadsheetId();
+    const sheets = await getSheetSheetsClient('pos');
+    const spreadsheetId = getButcherPOSSpreadsheetId();
     
     if (!spreadsheetId) {
-      console.error('Sales VCS Spreadsheet ID not found');
       return;
     }
 
@@ -787,87 +916,15 @@ export const saveDAMTargetToSheet = async (
       { week: 4, target: weeklyTarget, achieved: 0, percentage: 0, status: 'pending' }
     ];
 
+    // Prepare butcher targets JSON if provided
+    const butcherTargetsJson = butcherTargets && butcherTargets.length > 0 
+      ? JSON.stringify(butcherTargets)
+      : '';
+
     // Check if target already exists for this month/year
-    const existingTarget = await getDAMTargetFromSheet(month, year);
-    
-    if (existingTarget) {
-      // Update existing target
-      await updateExistingTarget(sheets, spreadsheetId, month, year, totalTarget, weeklyTargets);
-    } else {
-      // Add new target
-    const targetData = [
-        [month, year, totalTarget, JSON.stringify(weeklyTargets), 0, 0, new Date().toISOString()]
-    ];
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-        range: 'Target!A:G',
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: targetData
-      }
-    });
-    }
-
-    console.log(`Monthly target saved: ${month}/${year} - ₹${totalTarget}`);
-  } catch (error) {
-    console.error('Error saving DAM target to sheet:', error);
-  }
-};
-
-// Ensure Target tab has proper headers
-const ensureTargetTabHeaders = async (sheets: any, spreadsheetId: string) => {
-  try {
-    // Check if headers exist
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Target!A1:G1',
-    });
-
-    const existingHeaders = response.data.values?.[0] || [];
-    
-    // If headers don't exist or are incomplete, add them
-    if (existingHeaders.length < 7) {
-      const headers = [
-        'Month',
-        'Year', 
-        'Total Target (₹)',
-        'Weekly Targets (JSON)',
-        'Total Achieved (₹)',
-        'Overall Percentage (%)',
-        'Last Updated'
-      ];
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: 'Target!A1:G1',
-        valueInputOption: 'RAW',
-        requestBody: {
-          values: [headers]
-        }
-      });
-
-      console.log('Target tab headers created/updated');
-    }
-  } catch (error) {
-    console.error('Error ensuring Target tab headers:', error);
-  }
-};
-
-// Update existing target in the sheet
-const updateExistingTarget = async (
-  sheets: any, 
-  spreadsheetId: string, 
-  month: number, 
-  year: number, 
-  totalTarget: number, 
-  weeklyTargets: WeeklyTarget[]
-) => {
-  try {
-    // Find the row with the existing target
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: 'Target!A:G',
+      range: 'Target!A:H',
     });
 
     const rows = response.data.values || [];
@@ -888,28 +945,136 @@ const updateExistingTarget = async (
     }
 
     if (targetRowIndex > 0) {
-      // Update the existing row
+      // Update existing target
       const updateData = [
-        [month, year, totalTarget, JSON.stringify(weeklyTargets), 0, 0, new Date().toISOString()]
+        [month, year, totalTarget, JSON.stringify(weeklyTargets), 0, 0, new Date().toISOString(), butcherTargetsJson]
       ];
 
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `Target!A${targetRowIndex}:G${targetRowIndex}`,
+        range: `Target!A${targetRowIndex}:H${targetRowIndex}`,
         valueInputOption: 'RAW',
         requestBody: {
           values: updateData
         }
       });
+    } else {
+      // Add new target
+      const targetData = [
+        [month, year, totalTarget, JSON.stringify(weeklyTargets), 0, 0, new Date().toISOString(), butcherTargetsJson]
+      ];
 
-      console.log(`Updated existing target for ${month}/${year}`);
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: 'Target!A:H',
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: targetData
+        }
+      });
     }
-  } catch (error) {
-    console.error('Error updating existing target:', error);
+  } catch {
+    // Silent fail
   }
 };
 
-// Save comprehensive D.A.M analysis data to Target tab
+// Ensure Target tab has proper headers
+const ensureTargetTabHeaders = async (sheets: any, spreadsheetId: string) => {
+  try {
+    // Check if headers exist
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'Target!A1:H1',
+    });
+
+    const existingHeaders = response.data.values?.[0] || [];
+    
+    // If headers don't exist or are incomplete, add them
+    if (existingHeaders.length < 8) {
+      const headers = [
+        'Month',
+        'Year', 
+        'Total Target (₹)',
+        'Weekly Targets (JSON)',
+        'Total Achieved (₹)',
+        'Overall Percentage (%)',
+        'Last Updated',
+        'Butcher Targets (JSON)'
+      ];
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: 'Target!A1:H1',
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [headers]
+        }
+      });
+    }
+  } catch {
+    // Silent fail
+  }
+};
+
+// Update existing target in the sheet (legacy function - kept for compatibility)
+const updateExistingTarget = async (
+  sheets: any, 
+  spreadsheetId: string, 
+  month: number, 
+  year: number, 
+  totalTarget: number, 
+  weeklyTargets: WeeklyTarget[],
+  butcherTargets?: Array<{ butcherId: string; butcherName: string; target: number }>
+) => {
+  try {
+    // Find the row with the existing target
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'Target!A:H',
+    });
+
+    const rows = response.data.values || [];
+    let targetRowIndex = -1;
+
+    // Find the row with matching month and year
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.length >= 2) {
+        const targetMonth = parseInt(row[0]);
+        const targetYear = parseInt(row[1]);
+        
+        if (targetMonth === month && targetYear === year) {
+          targetRowIndex = i + 1; // Sheet rows are 1-indexed
+          break;
+        }
+      }
+    }
+
+    if (targetRowIndex > 0) {
+      const butcherTargetsJson = butcherTargets && butcherTargets.length > 0 
+        ? JSON.stringify(butcherTargets)
+        : '';
+        
+      // Update the existing row
+      const updateData = [
+        [month, year, totalTarget, JSON.stringify(weeklyTargets), 0, 0, new Date().toISOString(), butcherTargetsJson]
+      ];
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `Target!A${targetRowIndex}:H${targetRowIndex}`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: updateData
+        }
+      });
+    }
+  } catch {
+    // Silent fail
+  }
+};
+
+// Save comprehensive D.A.M analysis data to Target tab (now uses Butcher POS sheet)
 export const saveDAMAnalysisData = async (
   month: number,
   year: number,
@@ -925,11 +1090,10 @@ export const saveDAMAnalysisData = async (
   }
 ): Promise<void> => {
   try {
-    const sheets = await getSheetSheetsClient('sales');
-    const spreadsheetId = getSalesSpreadsheetId();
+    const sheets = await getSheetSheetsClient('pos');
+    const spreadsheetId = getButcherPOSSpreadsheetId();
     
     if (!spreadsheetId) {
-      console.error('Sales VCS Spreadsheet ID not found');
       return;
     }
 
@@ -953,23 +1117,21 @@ export const saveDAMAnalysisData = async (
       }
     });
 
-    console.log(`D.A.M analysis data saved for ${month}/${year}`);
-  } catch (error) {
-    console.error('Error saving D.A.M analysis data:', error);
+  } catch {
+    // Silent fail
   }
 };
 
-// Get D.A.M analysis data from Target tab
+// Get D.A.M analysis data from Target tab (now uses Butcher POS sheet)
 export const getDAMAnalysisData = async (
   month: number,
   year: number
 ): Promise<any | null> => {
   try {
-    const sheets = await getSheetSheetsClient('sales');
-    const spreadsheetId = getSalesSpreadsheetId();
+    const sheets = await getSheetSheetsClient('pos');
+    const spreadsheetId = getButcherPOSSpreadsheetId();
     
     if (!spreadsheetId) {
-      console.error('Sales VCS Spreadsheet ID not found');
       return null;
     }
 
@@ -994,29 +1156,28 @@ export const getDAMAnalysisData = async (
     }
     
     return null;
-  } catch (error) {
-    console.error('Error getting D.A.M analysis data:', error);
+  } catch {
     return null;
   }
 };
 
-// Get monthly target from sheet
+// Get monthly target from sheet with real-time achievement calculation from Butcher POS
+// Now reads targets from Butcher POS sheet instead of Sales VCS sheet
 export const getDAMTargetFromSheet = async (
   month: number,
   year: number
 ): Promise<MonthlyTarget | null> => {
   try {
-    const sheets = await getSheetSheetsClient('sales');
-    const spreadsheetId = getSalesSpreadsheetId();
+    const sheets = await getSheetSheetsClient('pos');
+    const spreadsheetId = getButcherPOSSpreadsheetId();
     
     if (!spreadsheetId) {
-      console.error('Sales VCS Spreadsheet ID not found');
       return null;
     }
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Target!A:G',
+      range: 'Target!A:H',
     });
 
     const rows = response.data.values || [];
@@ -1030,9 +1191,91 @@ export const getDAMTargetFromSheet = async (
         
         if (targetMonth === month && targetYear === year) {
           const totalTarget = parseFloat(row[2]);
-          const weeklyTargets = JSON.parse(row[3] || '[]');
-          const totalAchieved = parseFloat(row[4]) || 0;
-          const overallPercentage = parseFloat(row[5]) || 0;
+          let storedWeeklyTargets = [];
+          let butcherTargetsData = null;
+          let isButcherSpecific = false;
+          
+          try {
+            storedWeeklyTargets = JSON.parse(row[3] || '[]');
+          } catch {
+            storedWeeklyTargets = [];
+          }
+          
+          // Check for butcher-specific targets (column H)
+          if (row[7]) {
+            try {
+              butcherTargetsData = JSON.parse(row[7]);
+              isButcherSpecific = butcherTargetsData && butcherTargetsData.length > 0;
+            } catch {
+              butcherTargetsData = null;
+            }
+          }
+          
+          // Fetch real-time achievements from Butcher POS sheet
+          const posOrders = await getOrdersFromButcherPOSForMonth(month, year);
+          
+          // Calculate total achieved from POS data
+          const totalAchieved = posOrders.reduce((sum, order) => sum + order.revenue, 0);
+          const overallPercentage = totalTarget > 0 ? (totalAchieved / totalTarget) * 100 : 0;
+          
+          // Calculate weekly achievements
+          const weeklyTarget = totalTarget / 4;
+          const weeklyAchieved: { [week: number]: number } = { 1: 0, 2: 0, 3: 0, 4: 0 };
+          
+          posOrders.forEach(order => {
+            const dayOfMonth = order.orderDate.getDate();
+            const week = Math.min(Math.ceil(dayOfMonth / 7), 4);
+            weeklyAchieved[week] += order.revenue;
+          });
+          
+          const currentDate = new Date();
+          const isCurrentMonth = currentDate.getMonth() + 1 === month && currentDate.getFullYear() === year;
+          
+          const weeklyTargets: WeeklyTarget[] = [1, 2, 3, 4].map(week => {
+            const achieved = weeklyAchieved[week];
+            const percentage = weeklyTarget > 0 ? (achieved / weeklyTarget) * 100 : 0;
+            const weekEndDate = new Date(year, month - 1, week * 7);
+            
+            let status: 'pending' | 'achieved' | 'missed' = 'pending';
+            if (percentage >= 100) {
+              status = 'achieved';
+            } else if (isCurrentMonth && currentDate > weekEndDate && achieved > 0) {
+              status = 'missed';
+            } else if (!isCurrentMonth && year < currentDate.getFullYear()) {
+              status = achieved > 0 ? 'missed' : 'pending';
+            } else if (!isCurrentMonth && year === currentDate.getFullYear() && month < currentDate.getMonth() + 1) {
+              status = achieved > 0 ? 'missed' : 'pending';
+            }
+            
+            return {
+              week,
+              target: weeklyTarget,
+              achieved,
+              percentage,
+              status
+            };
+          });
+          
+          // Calculate butcher-specific achievements if targets are set
+          let butcherTargets: ButcherTarget[] | undefined;
+          if (isButcherSpecific && butcherTargetsData) {
+            const butcherAchievements: { [butcherId: string]: number } = {};
+            posOrders.forEach(order => {
+              butcherAchievements[order.butcherId] = (butcherAchievements[order.butcherId] || 0) + order.revenue;
+            });
+            
+            butcherTargets = butcherTargetsData.map((bt: any) => {
+              const achieved = butcherAchievements[bt.butcherId] || 0;
+              const percentage = bt.target > 0 ? (achieved / bt.target) * 100 : 0;
+              return {
+                butcherId: bt.butcherId,
+                butcherName: bt.butcherName || getButcherName(bt.butcherId),
+                target: bt.target,
+                achieved,
+                percentage
+              };
+            });
+          }
           
           return {
             month: new Date(year, month - 1).toLocaleString('default', { month: 'long' }),
@@ -1040,15 +1283,16 @@ export const getDAMTargetFromSheet = async (
             totalTarget,
             weeklyTargets,
             totalAchieved,
-            overallPercentage
+            overallPercentage,
+            butcherTargets,
+            isButcherSpecific
           };
         }
       }
     }
     
     return null;
-  } catch (error) {
-    console.error('Error getting DAM target from sheet:', error);
+  } catch {
     return null;
   }
 };
@@ -1086,16 +1330,13 @@ export const calculateWeeklyTargets = async (
           } else {
             orderDate = new Date(order.orderDate);
           }
-        } catch (error) {
-          console.warn(`Failed to parse date: ${order.orderDate}, using current date`);
+        } catch {
           orderDate = new Date();
         }
         
         // Calculate week number (1-4 for the month)
         const dayOfMonth = orderDate.getDate();
         const week = Math.ceil(dayOfMonth / 7);
-        
-        console.log(`Order ${order.orderId}: date=${order.orderDate}, dayOfMonth=${dayOfMonth}, week=${week}`);
         
       const currentSales = weeklySales.get(week) || 0;
       weeklySales.set(week, currentSales + order.salesRevenue);
@@ -1148,16 +1389,13 @@ export const calculateWeeklyTargets = async (
         } else {
           orderDate = new Date(order.orderDate);
         }
-      } catch (error) {
-        console.warn(`Failed to parse date: ${order.orderDate}, using current date`);
+      } catch {
         orderDate = new Date();
       }
       
       // Calculate week number (1-4 for the month)
       const dayOfMonth = orderDate.getDate();
       const week = Math.ceil(dayOfMonth / 7);
-      
-      console.log(`Fallback - Order ${order.orderId}: date=${order.orderDate}, dayOfMonth=${dayOfMonth}, week=${week}`);
       
       const currentSales = weeklySales.get(week) || 0;
       weeklySales.set(week, currentSales + order.salesRevenue);
@@ -1191,24 +1429,22 @@ export const calculateWeeklyTargets = async (
     }
 
     return weeklyTargets;
-  } catch (error) {
-    console.error('Error calculating weekly targets:', error);
+  } catch {
     return [];
   }
 };
 
-// Update weekly targets in the sheet
+// Update weekly targets in the sheet (now uses Butcher POS sheet)
 const updateWeeklyTargetsInSheet = async (
   month: number,
   year: number,
   weeklyTargets: WeeklyTarget[]
 ) => {
   try {
-    const sheets = await getSheetSheetsClient('sales');
-    const spreadsheetId = getSalesSpreadsheetId();
+    const sheets = await getSheetSheetsClient('pos');
+    const spreadsheetId = getButcherPOSSpreadsheetId();
     
     if (!spreadsheetId) {
-      console.error('Sales VCS Spreadsheet ID not found');
       return;
     }
 
@@ -1262,11 +1498,9 @@ const updateWeeklyTargetsInSheet = async (
           values: updateData
         }
       });
-
-      console.log(`Updated weekly targets for ${month}/${year}`);
     }
-  } catch (error) {
-    console.error('Error updating weekly targets in sheet:', error);
+  } catch {
+    // Silent fail
   }
 };
 
@@ -1278,12 +1512,10 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
     const spreadsheetId = process.env.BUTCHER_POS_SHEET_ID;
     
     if (!spreadsheetId) {
-      console.log('Main butcher POS spreadsheet ID not found');
       return 0;
     }
     
     const butcherName = getButcherName(butcherId);
-    console.log(`Looking for order ${orderId} in main sheet ${butcherName} tab`);
     
     const response = await mainSheets.spreadsheets.values.get({
       spreadsheetId,
@@ -1291,7 +1523,6 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
     });
 
     const rows = response.data.values || [];
-    console.log(`Found ${rows.length} rows in main sheet ${butcherName} tab`);
     
     // Find the Revenue column index
     let revenueColumnIndex = -1;
@@ -1300,14 +1531,12 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
       for (let i = 0; i < headerRow.length; i++) {
         if (headerRow[i] && headerRow[i].toLowerCase().includes('revenue')) {
           revenueColumnIndex = i;
-          console.log(`Found Revenue column at index ${i}`);
           break;
         }
       }
     }
     
     if (revenueColumnIndex === -1) {
-      console.log('Revenue column not found in main sheet');
       return 0;
     }
     
@@ -1315,7 +1544,6 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
     // Full order ID format: ORD-YYYY-MM-DD-NNNN
     // Simple order number: NNNN (last part after the last dash)
     const simpleOrderId = orderId.includes('-') ? orderId.split('-').pop() : orderId;
-    console.log(`Extracted simple order ID: "${simpleOrderId}" from full order ID: "${orderId}"`);
     
     // Find the order by simple ID and extract revenue
     for (let i = 1; i < rows.length; i++) {
@@ -1336,8 +1564,7 @@ export const getButcherRevenueFromMainSheet = async (orderId: string, butcherId:
     }
     
     return 0;
-  } catch (error) {
-    console.error('Error getting butcher revenue from main sheet:', error);
+  } catch {
     return 0;
   }
 };
