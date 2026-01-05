@@ -3,8 +3,8 @@
 const SW_VERSION = '2026.01.03-2';
 
 // Cache names - Increment version numbers on each deployment to clear old caches
-const STATIC_CACHE_NAME = 'butcherbot-static-v15';
-const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v15';
+const STATIC_CACHE_NAME = 'butcherbot-static-v16';
+const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v16';
 
 // Files to cache for offline functionality
 // Note: For Next.js, these routes will be cached as HTML pages
