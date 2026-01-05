@@ -1461,15 +1461,44 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
         
         // Order Date: Use the actual order date from order.orderTime, not today's date
         // Convert order.orderTime to IST date string (DD/MM/YYYY format) to match sheet format
+        const orderTimeDate = new Date(order.orderTime);
         const orderDate = order.orderTime 
             ? (() => {
-                const date = new Date(order.orderTime);
+                const date = orderTimeDate;
                 const day = String(date.getDate()).padStart(2, '0');
                 const month = String(date.getMonth() + 1).padStart(2, '0');
                 const year = date.getFullYear();
                 return `${day}/${month}/${year}`;
             })()
             : getISTDate(); // Fallback to today if orderTime is not available
+        
+        // Helper function to normalize dates for comparison
+        // Handles both "1/1/2025" and "01/01/2025" formats
+        const normalizeDateForComparison = (dateStr: string): string => {
+            if (!dateStr) return '';
+            // Split by / or - and normalize each part
+            const parts = dateStr.split(/[\/\-]/);
+            if (parts.length >= 3) {
+                // Remove leading zeros for consistent comparison
+                const day = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10);
+                const year = parseInt(parts[2], 10);
+                return `${day}/${month}/${year}`; // Normalized format without leading zeros
+            }
+            return dateStr;
+        };
+        
+        // Generate all possible date formats for the order
+        const orderDateVariants = [
+            orderDate, // DD/MM/YYYY with leading zeros (01/01/2025)
+            `${orderTimeDate.getDate()}/${orderTimeDate.getMonth() + 1}/${orderTimeDate.getFullYear()}`, // D/M/YYYY without leading zeros (1/1/2025)
+            orderTimeDate.toLocaleDateString('en-US'), // US format: M/D/YYYY or MM/DD/YYYY
+            orderTimeDate.toLocaleDateString('en-CA'), // Canadian format: YYYY-MM-DD
+            orderTimeDate.toISOString().split('T')[0], // ISO format: YYYY-MM-DD
+        ];
+        
+        // Normalized version of order date for flexible matching
+        const normalizedOrderDate = normalizeDateForComparison(orderDate);
         
         // Determine butcher type for column structure
         const isMeat = isMeatButcher(butcherId);
@@ -1501,38 +1530,19 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
             // Convert both to strings for comparison (sheet values are strings)
             const rowOrderNoStr = String(rowOrderNo || '').trim();
             
-            // Match both date and order number to ensure uniqueness
-            if (rowDate === orderDate && rowOrderNoStr === orderNoStr) {
-                rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
-                break;
-            }
-        }
-
-        if (rowIndex === -1) {
-            // Try alternative date formats based on order.orderTime
-            const orderTimeDate = new Date(order.orderTime);
-            const alternativeDates = [
-                orderTimeDate.toLocaleDateString('en-US'), // US format: MM/DD/YYYY
-                orderTimeDate.toLocaleDateString('en-CA'), // Canadian format: YYYY-MM-DD
-                orderTimeDate.toISOString().split('T')[0], // ISO format: YYYY-MM-DD
-                orderDate, // Already tried format (en-GB)
-            ];
-            
-            for (let altDate of alternativeDates) {
-                const orderNoStr = String(orderNo);
-                // CRITICAL FIX: Range A2:G means rows start from sheet row 2
-                // rows[0] = sheet row 2, rows[1] = sheet row 3, etc.
-                for (let i = 0; i < rows.length; i++) {
-                    const rowDate = rows[i][0];
-                    const rowOrderNo = rows[i][1];
-                    const rowOrderNoStr = String(rowOrderNo || '').trim();
-                    
-                    if (rowDate === altDate && rowOrderNoStr === orderNoStr) {
-                        rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
-                        break;
-                    }
+            // Match order number first
+            if (rowOrderNoStr === orderNoStr) {
+                // Normalize the row date for flexible comparison (handles 1/1/2025 vs 01/01/2025)
+                const normalizedRowDate = normalizeDateForComparison(rowDate);
+                
+                // Check if dates match (either exact match or normalized match)
+                if (rowDate === orderDate || 
+                    normalizedRowDate === normalizedOrderDate ||
+                    orderDateVariants.includes(rowDate) ||
+                    orderDateVariants.map(d => normalizeDateForComparison(d)).includes(normalizedRowDate)) {
+                    rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
+                    break;
                 }
-                if (rowIndex !== -1) break;
             }
         }
         
@@ -1585,7 +1595,6 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                 );
                 
                 const newRows = newResponse.data.values || [];
-                const orderNoStr = String(orderNo);
                 // CRITICAL FIX: Range A2:G means rows start from sheet row 2
                 // rows[0] = sheet row 2, rows[1] = sheet row 3, etc.
                 for (let i = 0; i < newRows.length; i++) {
@@ -1593,9 +1602,16 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                     const rowOrderNo = newRows[i][1];
                     const rowOrderNoStr = String(rowOrderNo || '').trim();
                     
-                    if (rowDate === orderDate && rowOrderNoStr === orderNoStr) {
-                        rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
-                        break;
+                    // Match order number first, then use flexible date matching
+                    if (rowOrderNoStr === orderNoStr) {
+                        const normalizedRowDate = normalizeDateForComparison(rowDate);
+                        if (rowDate === orderDate || 
+                            normalizedRowDate === normalizedOrderDate ||
+                            orderDateVariants.includes(rowDate) ||
+                            orderDateVariants.map(d => normalizeDateForComparison(d)).includes(normalizedRowDate)) {
+                            rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
+                            break;
+                        }
                     }
                 }
                 
