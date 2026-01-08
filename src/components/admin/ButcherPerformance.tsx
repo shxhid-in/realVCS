@@ -107,26 +107,52 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
   }, [parseWeightToKg])
 
   const getItemRevenue = useCallback((order: Order, itemName: string): number => {
-    if (!order.itemRevenues) return 0
-    
     const englishName = extractEnglishName(itemName)
-    
-    if (order.itemRevenues[englishName] !== undefined) {
-      return order.itemRevenues[englishName]
+    const itemSize = order.items.find(i => i.name === itemName)?.size
+    const tryLookup = (key: string | undefined) => {
+      if (!key || !order.itemRevenues) return undefined
+      return order.itemRevenues[key]
     }
-    
-    if (order.itemRevenues[itemName] !== undefined) {
-      return order.itemRevenues[itemName]
+
+    // Prefer itemRevenues when present
+    const directFromItemRev = tryLookup(englishName) 
+      ?? tryLookup(itemName) 
+      ?? tryLookup(itemSize ? `${englishName}_${itemSize}` : undefined) 
+      ?? tryLookup(itemSize ? `${itemName}_${itemSize}` : undefined)
+
+    if (directFromItemRev !== undefined) {
+      return directFromItemRev
     }
-    
-    for (const [key, value] of Object.entries(order.itemRevenues)) {
-      if (extractEnglishName(key) === englishName || key === englishName) {
-        return value
+
+    if (order.itemRevenues) {
+      for (const [key, value] of Object.entries(order.itemRevenues)) {
+        if (extractEnglishName(key) === englishName || key === englishName) {
+          return value
+        }
       }
     }
-    
-    return 0
-  }, [])
+
+    // Fallback: apportion total order revenue based on weight/quantity
+    const totalRevenue = order.itemRevenues
+      ? Object.values(order.itemRevenues).reduce((sum, rev) => sum + rev, 0)
+      : (order.revenue || 0)
+
+    if (!totalRevenue) return 0
+
+    const itemWeight = getItemWeight(order, itemName)
+    const totalWeight = order.items.reduce((sum, itm) => sum + getItemWeight(order, itm.name), 0)
+    const totalQuantity = order.items.reduce((sum, itm) => sum + (itm.quantity || 0), 0)
+    let proportion = 0
+
+    if (totalWeight > 0) {
+      proportion = itemWeight / totalWeight
+    } else if (totalQuantity > 0) {
+      const targetItem = order.items.find(i => i.name === itemName)
+      proportion = targetItem ? targetItem.quantity / totalQuantity : 0
+    }
+
+    return totalRevenue * proportion
+  }, [getItemWeight])
 
   const totalKilograms = useMemo(() => {
     let totalKg = 0
@@ -419,6 +445,7 @@ export function ButcherPerformance({ allOrders, onRefresh, isLoading }: ButcherP
         revenue: data.revenue
       }))
       .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 10)
   }, [filteredOrders, selectedButcher, getItemRevenue])
 
   const priceComparison = useMemo(() => {

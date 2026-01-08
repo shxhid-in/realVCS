@@ -260,33 +260,33 @@ export const InvoicesTab = React.forwardRef<InvoicesTabRef, InvoicesTabProps>(
                     const customerPhone = ZohoService.getCustomerPhone(invoice)
 
                     return (
-                      <TableRow 
+                        <TableRow 
                         key={invoice.invoice_id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => handleInvoiceClick(invoice)}
-                      >
-                        <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handleInvoiceClick(invoice)}
+                        >
+                          <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
                         <TableCell>
                           <span className="text-sm font-mono">
                             {invoice.reference_number || 'N/A'}
                           </span>
                         </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium">{invoice.customer_name}</p>
-                            {customerPhone && (
-                              <p className="text-xs text-muted-foreground">{customerPhone}</p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          <IndianRupee className="h-4 w-4 inline mr-1" />
-                          {invoice.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell>
-                          {getInvoiceStatusBadge(invoice.status)}
-                        </TableCell>
-                      </TableRow>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{invoice.customer_name}</p>
+                              {customerPhone && (
+                                <p className="text-xs text-muted-foreground">{customerPhone}</p>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            <IndianRupee className="h-4 w-4 inline mr-1" />
+                            {invoice.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell>
+                            {getInvoiceStatusBadge(invoice.status)}
+                          </TableCell>
+                        </TableRow>
                     )
                   })
                 )}

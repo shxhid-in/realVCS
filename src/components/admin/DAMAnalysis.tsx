@@ -296,7 +296,7 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
               if (commissionRate > 0 && commissionRate < 1) {
                 // Formula: salesRevenue = butcherRevenue / (1 - commissionRate)
                 const itemSalesRevenue = itemRevenue / (1 - commissionRate);
-                salesRevenue += itemSalesRevenue;
+              salesRevenue += itemSalesRevenue;
                 hasValidCommissionRate = true;
               }
             }
@@ -314,7 +314,7 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
               // Formula: salesRevenue = butcherRevenue / (1 - commissionRate)
               salesRevenue = butcherRevenue / (1 - avgCommissionRate);
               hasValidCommissionRate = true;
-            }
+        }
           }
         }
         
@@ -989,33 +989,33 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
                 <div className="mt-6 space-y-4">
                   {/* Overall Progress */}
                   <div className="p-4 bg-muted rounded-lg">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold">
-                        {months[selectedMonth - 1]?.label} {selectedYear} Target
-                      </h3>
-                      <Badge variant="outline" className="text-lg font-bold">
-                        {formatCurrency(monthlyTarget.totalTarget)}
-                      </Badge>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">
+                      {months[selectedMonth - 1]?.label} {selectedYear} Target
+                    </h3>
+                    <Badge variant="outline" className="text-lg font-bold">
+                      {formatCurrency(monthlyTarget.totalTarget)}
+                    </Badge>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Overall Progress</span>
+                      <span className="text-sm text-muted-foreground">
+                        {formatCurrency(monthlyTarget.totalAchieved)} / {formatCurrency(monthlyTarget.totalTarget)}
+                      </span>
                     </div>
-                    
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">Overall Progress</span>
-                        <span className="text-sm text-muted-foreground">
-                          {formatCurrency(monthlyTarget.totalAchieved)} / {formatCurrency(monthlyTarget.totalTarget)}
-                        </span>
-                      </div>
-                      <Progress 
+                    <Progress 
                         value={Math.min(monthlyTarget.overallPercentage, 100)} 
-                        className="h-3"
-                      />
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">0%</span>
-                        <span className={`font-semibold ${getOverallProgressColor(monthlyTarget.overallPercentage).replace('bg-', 'text-')}`}>
-                          {monthlyTarget.overallPercentage.toFixed(1)}%
-                        </span>
-                        <span className="text-muted-foreground">100%</span>
-                      </div>
+                      className="h-3"
+                    />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">0%</span>
+                      <span className={`font-semibold ${getOverallProgressColor(monthlyTarget.overallPercentage).replace('bg-', 'text-')}`}>
+                        {monthlyTarget.overallPercentage.toFixed(1)}%
+                      </span>
+                      <span className="text-muted-foreground">100%</span>
+                    </div>
                     </div>
                   </div>
                   
@@ -1044,7 +1044,7 @@ const DAMAnalysis: React.FC<DAMAnalysisProps> = ({ allOrders = [], onRefresh, is
                             />
                           </div>
                         ))}
-                      </div>
+                  </div>
                     </div>
                   )}
                 </div>

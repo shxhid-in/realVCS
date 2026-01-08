@@ -349,20 +349,17 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     return totalRevenue;
   };
 
-  // Calculate item-wise statistics for today only
-  const todayCompletedOrders = useMemo(() => {
-    return filteredOrders.filter(order => {
-      const orderDate = new Date(order.orderTime);
-      const today = new Date();
-      return orderDate.toDateString() === today.toDateString() && 
-             ['completed', 'prepared', 'ready to pick up'].includes(order.status.toLowerCase());
-    });
+  // Calculate item-wise statistics for the currently selected date range (uses filteredOrders)
+  const filteredCompletedOrders = useMemo(() => {
+    return filteredOrders.filter(order => 
+      ['completed', 'prepared', 'ready to pick up'].includes(order.status.toLowerCase())
+    );
   }, [filteredOrders]);
 
 
   useEffect(() => {
     const runCalculation = async () => {
-      if (todayCompletedOrders.length === 0) {
+      if (filteredCompletedOrders.length === 0) {
         setItemStats({});
         return;
       }
@@ -375,7 +372,7 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
       try {
         const stats: Record<string, { totalWeight: number; totalRevenue: number; count: number }> = {};
 
-        for (const order of todayCompletedOrders) {
+        for (const order of filteredCompletedOrders) {
           const orderRevenue = await calculateOrderRevenue(order);
           const orderWeight = order.pickedWeight || order.items.reduce((sum, item) => sum + item.quantity, 0);
           
@@ -403,7 +400,7 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
     };
 
     runCalculation();
-  }, [todayCompletedOrders]); // Use direct dependency
+  }, [filteredCompletedOrders]); // Use direct dependency
 
   const sortedItemStats = Object.entries(itemStats)
     .map(([name, stats]) => ({ name, ...stats }))
@@ -589,16 +586,16 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
         </Card>
       </div>
 
-      {/* Item-wise Sales Today */}
+      {/* Item-wise Sales (respects selected date range) */}
       {isCalculatingItemStats ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
-              Item-wise Sales Today
+              Item-wise Sales
             </CardTitle>
             <CardDescription>
-              Calculating item sales data...
+              Calculating item sales data for the selected date range...
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -613,10 +610,10 @@ export function OrdersAnalytics({ className, allOrders, onRefresh, isLoading: ex
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
-              Item-wise Sales Today
+              Item-wise Sales
             </CardTitle>
             <CardDescription>
-              Breakdown of items sold today across all butchers
+              Breakdown of items sold for the selected date range
             </CardDescription>
           </CardHeader>
           <CardContent>

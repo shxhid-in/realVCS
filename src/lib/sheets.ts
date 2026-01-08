@@ -1540,9 +1540,9 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                     normalizedRowDate === normalizedOrderDate ||
                     orderDateVariants.includes(rowDate) ||
                     orderDateVariants.map(d => normalizeDateForComparison(d)).includes(normalizedRowDate)) {
-                    rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
-                    break;
-                }
+                        rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
+                        break;
+                    }
             }
         }
         
@@ -1609,8 +1609,8 @@ export const updateOrderInSheet = async (order: Order, butcherId: string) => {
                             normalizedRowDate === normalizedOrderDate ||
                             orderDateVariants.includes(rowDate) ||
                             orderDateVariants.map(d => normalizeDateForComparison(d)).includes(normalizedRowDate)) {
-                            rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
-                            break;
+                        rowIndex = i + 2; // Range starts at row 2, so add 2 (not 1)
+                        break;
                         }
                     }
                 }

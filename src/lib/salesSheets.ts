@@ -418,7 +418,7 @@ export const saveSalesDataToSheet = async (
         values: [rowData]
       }
     });
-
+    
   } catch (error) {
     throw new Error(`Failed to save sales data: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -936,7 +936,7 @@ export const saveDAMTargetToSheet = async (
       if (row.length >= 2) {
         const targetMonth = parseInt(row[0]);
         const targetYear = parseInt(row[1]);
-        
+    
         if (targetMonth === month && targetYear === year) {
           targetRowIndex = i + 1; // Sheet rows are 1-indexed
           break;
@@ -960,18 +960,18 @@ export const saveDAMTargetToSheet = async (
       });
     } else {
       // Add new target
-      const targetData = [
+    const targetData = [
         [month, year, totalTarget, JSON.stringify(weeklyTargets), 0, 0, new Date().toISOString(), butcherTargetsJson]
-      ];
+    ];
 
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
         range: 'Target!A:H',
-        valueInputOption: 'RAW',
-        requestBody: {
-          values: targetData
-        }
-      });
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: targetData
+      }
+    });
     }
   } catch {
     // Silent fail
