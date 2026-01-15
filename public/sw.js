@@ -1,7 +1,7 @@
-const SW_VERSION = '2026.01.08-1';
+const SW_VERSION = '2026.01.16-1';
 
-const STATIC_CACHE_NAME = 'butcherbot-static-v17';
-const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v17';
+const STATIC_CACHE_NAME = 'butcherbot-static-v18';
+const DYNAMIC_CACHE_NAME = 'butcherbot-dynamic-v18';
 
 const STATIC_FILES = [
   '/',

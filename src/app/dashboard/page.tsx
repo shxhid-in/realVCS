@@ -347,9 +347,19 @@ const WeightDialog = ({
                 });
             }
         } else {
-            // For 'kg' unit: allow rational numbers (decimals)
+            // For 'kg' unit: allow rational numbers (decimals) with max 2 decimal places
             // Allow empty, numbers, and one decimal point
-            const decimalNumber = value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+            let decimalNumber = value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+            
+            // Limit to 2 decimal places
+            if (decimalNumber.includes('.')) {
+                const parts = decimalNumber.split('.');
+                if (parts[1] && parts[1].length > 2) {
+                    // Limit to 2 decimal places
+                    decimalNumber = parts[0] + '.' + parts[1].substring(0, 2);
+                }
+            }
+            
             if (decimalNumber === '' || !isNaN(parseFloat(decimalNumber))) {
                 updateDialogState({
                     weights: {
