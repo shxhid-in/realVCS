@@ -34,10 +34,13 @@ function needsWeightDialog(itemName: string): boolean {
            itemNameLower.includes('chicken thigh') ||
            itemNameLower.includes('chicken with skin') ||
            itemNameLower.includes('chicken chilled meat') ||
+           itemNameLower.includes('chicken chilled boneless') ||
+           itemNameLower.includes('beef chilled boneless') ||
            itemNameLower.includes('nadan') ||
            itemNameLower.includes('thigh') ||
            itemNameLower.includes('with skin') ||
-           itemNameLower.includes('chilled meat');
+           itemNameLower.includes('chilled meat') ||
+           itemNameLower.includes('chilled boneless');
 }
 
 // Helper function to check if an item needs weight entry
